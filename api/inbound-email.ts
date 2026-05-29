@@ -139,7 +139,7 @@ Rules:
 - If nothing extractable, return empty arrays for school_events and action_items`;
 
   const parseResp = await anthropic.messages.create({
-    model: 'claude-opus-4-5',
+    model: 'claude-opus-4-8',
     max_tokens: 2000,
     messages: [{ role: 'user', content: parserPrompt }],
   });
