@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "seed": "tsx scripts/seed.ts"
+    "seed": "node --env-file=.env --import tsx/esm scripts/seed.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
