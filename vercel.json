@@ -1,9 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/inbound-email.ts": { "maxDuration": 60 },
-    "api/mcp.ts": { "maxDuration": 30 },
-    "api/google-oauth.ts": { "maxDuration": 10 },
-    "api/google-callback.ts": { "maxDuration": 10 }
-  }
-}
