@@ -13,7 +13,7 @@ const supabase = createClient(
 const HOUSEHOLD = {
   name: 'Megha Household',
   timezone: 'America/Los_Angeles',
-  digest_email: 'megha@example.com', // your real Gmail
+  digest_email: 'meghagulati30@gmail.com',
 };
 
 const MEMBERS = [

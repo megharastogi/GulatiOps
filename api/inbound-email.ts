@@ -12,7 +12,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
-const resend = new Resend(process.env.RESEND_API_KEY!);
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 // Verify the request actually came from your Cloudflare Worker
 function verifySharedSecret(req: VercelRequest): boolean {
@@ -195,7 +195,7 @@ Rules:
     parsed.classification === 'action_required' ||
     (parsed.classification === 'informational' && parsed.school_events?.length > 0);
 
-  if (shouldNotify) {
+  if (shouldNotify && resend) {
     await sendPerEmailSummary(household, email, parsed);
   }
 }
