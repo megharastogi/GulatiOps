@@ -70,6 +70,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true, email_id: emailRow.id });
 }
 
+function extractLinks(html: string): string[] {
+  const matches = [...html.matchAll(/href="(https?:\/\/[^"]+)"/gi)];
+  return matches
+    .map((m) => m[1])
+    .filter((url) => !/(unsubscribe|optout|click\.email|tracking|open\.php|pixel|beacon)/i.test(url))
+    .slice(0, 3);
+}
+
+async function fetchNewsletterContent(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return '';
+    const html = await res.text();
+    return html
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+      .slice(0, 4000);
+  } catch {
+    return '';
+  }
+}
+
 async function parseAndProcessEmail(emailId: string, household: any) {
   const { data: email } = await supabase
     .from('inbound_emails')
@@ -78,6 +103,14 @@ async function parseAndProcessEmail(emailId: string, household: any) {
     .single();
 
   if (!email) return;
+
+  // Fetch linked newsletter content
+  const links = extractLinks(email.body_html || '');
+  const linkedContents = await Promise.all(links.map(fetchNewsletterContent));
+  const newsletterSection = linkedContents
+    .map((c, i) => c ? `\nLinked page ${i + 1} (${links[i]}):\n${c}` : '')
+    .filter(Boolean)
+    .join('\n');
 
   // Build context for the parser
   const today = new Date().toISOString().slice(0, 10);
@@ -96,7 +129,7 @@ Email:
 From: ${email.from_name || ''} <${email.from_address}>
 Subject: ${email.subject}
 Body:
-${email.body_text || email.body_html?.replace(/<[^>]+>/g, ' ') || ''}
+${email.body_text || email.body_html?.replace(/<[^>]+>/g, ' ') || ''}${newsletterSection}
 
 Return ONLY a JSON object with this shape, no prose, no markdown fences:
 
