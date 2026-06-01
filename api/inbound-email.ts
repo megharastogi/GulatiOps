@@ -163,9 +163,10 @@ Return ONLY a JSON object with this shape, no prose, no markdown fences:
 }
 
 Rules:
-- "noise" = generic reminders, newsletters, marketing — no dates and no asks
-- "informational" = useful info but nothing for the parent to do (e.g. "tomorrow is spirit day, wear red")
-- "action_required" = the parent must sign up, RSVP, pay, send something, or attend
+- "noise" = truly no useful content: marketing, unsubscribe confirmations, generic thank-you notes with no dates or asks. Do NOT classify as noise just because it is formatted like a newsletter — newsletters often contain events and action items.
+- "informational" = contains useful info (dates, events, reminders) but nothing the parent must actively do
+- "action_required" = the parent must sign up, RSVP, pay, send something, or attend something
+- If the email or any linked page contains ANY dates, events, or asks, it is at minimum "informational"
 - Spirit days, themed dress days → school_events with event_type "spirit_day", AND no action item unless something specific must be brought
 - Always extract dates in absolute YYYY-MM-DD form; "next Friday" must be resolved against today's date
 - If a single email contains multiple events or asks, return them all
