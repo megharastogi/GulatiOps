@@ -47,24 +47,33 @@ async function getValidAccessToken(householdId: string): Promise<string> {
   return tokens.access_token;
 }
 
+function resolveCalendarId(calendar?: string): string {
+  if (calendar === 'kian_school') {
+    return process.env.KIAN_SCHOOL_CALENDAR_ID || 'primary';
+  }
+  return 'primary';
+}
+
 export async function checkBusy(
   householdId: string,
   startIso: string,
-  endIso: string
+  endIso: string,
+  calendar?: string
 ): Promise<{ busy: boolean; conflicts: any[] }> {
   const token = await getValidAccessToken(householdId);
+  const calendarId = resolveCalendarId(calendar);
   const resp = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       timeMin: startIso,
       timeMax: endIso,
-      items: [{ id: 'primary' }],
+      items: [{ id: calendarId }],
     }),
   });
   if (!resp.ok) throw new Error(`freeBusy failed: ${await resp.text()}`);
   const data = await resp.json();
-  const busyBlocks = data.calendars?.primary?.busy || [];
+  const busyBlocks = data.calendars?.[calendarId]?.busy || [];
   return { busy: busyBlocks.length > 0, conflicts: busyBlocks };
 }
 
@@ -76,11 +85,13 @@ export async function createEvent(
     location?: string;
     startIso: string;
     endIso: string;
-    inviteEmails?: string[]; // only set when user explicitly asked
+    inviteEmails?: string[];
     timezone?: string;
+    calendar?: string;
   }
 ) {
   const token = await getValidAccessToken(householdId);
+  const calendarId = resolveCalendarId(evt.calendar);
   const body: any = {
     summary: evt.summary,
     description: evt.description,
@@ -93,7 +104,7 @@ export async function createEvent(
   }
 
   const resp = await fetch(
-    'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all',
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?sendUpdates=all`,
     {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },

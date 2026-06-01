@@ -123,12 +123,13 @@ const TOOLS = [
   {
     name: 'check_calendar_busy',
     description:
-      'Check whether the user is busy on Google Calendar in a given time window. Use BEFORE creating an event to warn about conflicts.',
+      'Check whether a calendar is busy in a given time window. Use BEFORE creating an event to warn about conflicts.',
     inputSchema: {
       type: 'object',
       properties: {
         start_iso: { type: 'string', description: 'ISO datetime with timezone' },
         end_iso: { type: 'string', description: 'ISO datetime with timezone' },
+        calendar: { type: 'string', enum: ['personal', 'kian_school'], description: 'Which calendar to check. Default: personal.' },
       },
       required: ['start_iso', 'end_iso'],
     },
@@ -136,7 +137,7 @@ const TOOLS = [
   {
     name: 'create_calendar_event',
     description:
-      'Create an event on the user\'s personal Google Calendar. ONLY add invite_emails when the user explicitly says to invite someone. Always check_calendar_busy first.',
+      'Create a calendar event. Use calendar="kian_school" for Kian\'s school calendar, "personal" (default) for Megha\'s personal calendar. ONLY add invite_emails when explicitly asked. Always check_calendar_busy first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -145,6 +146,7 @@ const TOOLS = [
         location: { type: 'string' },
         start_iso: { type: 'string' },
         end_iso: { type: 'string' },
+        calendar: { type: 'string', enum: ['personal', 'kian_school'], description: 'Which calendar to add the event to. Ask the user if unclear.' },
         invite_emails: {
           type: 'array',
           items: { type: 'string' },
@@ -316,7 +318,7 @@ async function callTool(name: string, args: any) {
     }
 
     case 'check_calendar_busy': {
-      return await checkBusy(household.id, args.start_iso, args.end_iso);
+      return await checkBusy(household.id, args.start_iso, args.end_iso, args.calendar);
     }
 
     case 'create_calendar_event': {
@@ -328,6 +330,7 @@ async function callTool(name: string, args: any) {
         endIso: args.end_iso,
         inviteEmails: args.invite_emails,
         timezone: household.timezone,
+        calendar: args.calendar,
       });
       return {
         created: true,
