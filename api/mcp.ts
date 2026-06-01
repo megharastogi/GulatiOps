@@ -352,9 +352,10 @@ async function callTool(name: string, args: any) {
 
 // -------- MCP JSON-RPC handler --------
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Optional shared-secret auth — claude.ai supports custom headers on connectors
+  // Accept secret via header or query param (claude.ai connector UI doesn't support headers)
   if (process.env.MCP_SHARED_SECRET) {
-    if (req.headers['x-mcp-secret'] !== process.env.MCP_SHARED_SECRET) {
+    const provided = req.headers['x-mcp-secret'] || req.query['secret'];
+    if (provided !== process.env.MCP_SHARED_SECRET) {
       return res.status(401).json({ error: 'unauthorized' });
     }
   }
