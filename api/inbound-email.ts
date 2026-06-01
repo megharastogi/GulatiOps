@@ -79,16 +79,14 @@ function extractLinks(html: string): string[] {
 
 async function fetchNewsletterContent(url: string): Promise<string> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    // Use Jina Reader to handle JS-rendered pages (Smore, Peachjar, etc.)
+    const readerUrl = `https://r.jina.ai/${url}`;
+    const res = await fetch(readerUrl, {
+      headers: { 'Accept': 'text/plain' },
+      signal: AbortSignal.timeout(15000),
+    });
     if (!res.ok) return '';
-    const html = await res.text();
-    return html
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s{2,}/g, ' ')
-      .trim()
-      .slice(0, 4000);
+    return (await res.text()).slice(0, 4000);
   } catch {
     return '';
   }
