@@ -137,7 +137,7 @@ Return ONLY a JSON object with this shape, no prose, no markdown fences:
   "summary": "<1-2 sentence summary in plain English>",
   "school_events": [
     {
-      "event_type": "day_off" | "early_pickup" | "late_start" | "event" | "fundraiser" | "spirit_day" | "conference",
+      "event_type": "day_off" | "early_pickup" | "late_start" | "event" | "fundraiser" | "spirit_day" | "conference" | "social",
       "title": "<short title>",
       "description": "<details>",
       "start_date": "YYYY-MM-DD",
@@ -165,6 +165,7 @@ Rules:
 - "action_required" = the parent must sign up, RSVP, pay, send something, or attend something
 - If the email or any linked page contains ANY dates, events, or asks, it is at minimum "informational"
 - Spirit days, themed dress days → school_events with event_type "spirit_day", AND no action item unless something specific must be brought
+- Extract ALL notable dates as school_events, even if no parent action is needed — e.g. "Donuts with Dads", "last pizza lunch", "Moving Up Mass", graduation, class parties. Use event_type "social" for fun/celebratory events that are worth knowing about but require no action.
 - Always extract dates in absolute YYYY-MM-DD form; "next Friday" must be resolved against today's date
 - If a single email contains multiple events or asks, return them all
 - If nothing extractable, return empty arrays for school_events and action_items`;
