@@ -4,7 +4,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { checkBusy, createEvent } from '../lib/google-calendar.js';
+import { checkBusy, createEvent, listEvents, deleteEvent } from '../lib/google-calendar.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -163,6 +163,30 @@ const TOOLS = [
     description:
       'List the household members (parents, children, etc.) with their emails for invites.',
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'list_calendar_events',
+    description: 'List upcoming Google Calendar events with their IDs. Use this before deleting events to find the right event_id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendar: { type: 'string', enum: ['personal', 'kian_school'] },
+        time_min: { type: 'string', description: 'ISO datetime, default now' },
+        time_max: { type: 'string', description: 'ISO datetime, default +90 days' },
+      },
+    },
+  },
+  {
+    name: 'delete_calendar_event',
+    description: 'Delete a Google Calendar event by ID. Use list_calendar_events first to find the event_id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        event_id: { type: 'string' },
+        calendar: { type: 'string', enum: ['personal', 'kian_school'] },
+      },
+      required: ['event_id'],
+    },
   },
 ];
 
@@ -348,6 +372,16 @@ async function callTool(name: string, args: any) {
         .select('id, name, role, email, notes')
         .eq('household_id', household.id);
       return data || [];
+    }
+
+    case 'list_calendar_events': {
+      const timeMax = args.time_max ||
+        new Date(Date.now() + 90 * 86400_000).toISOString();
+      return await listEvents(household.id, args.calendar, args.time_min, timeMax);
+    }
+
+    case 'delete_calendar_event': {
+      return await deleteEvent(household.id, args.event_id, args.calendar);
     }
 
     default:

@@ -120,3 +120,48 @@ export async function createEvent(
   if (!resp.ok) throw new Error(`createEvent failed: ${await resp.text()}`);
   return resp.json();
 }
+
+export async function listEvents(
+  householdId: string,
+  calendar?: string,
+  timeMin?: string,
+  timeMax?: string
+) {
+  const token = await getValidAccessToken(householdId);
+  const calendarId = resolveCalendarId(calendar);
+  const params = new URLSearchParams({
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '100',
+    timeMin: timeMin || new Date().toISOString(),
+    ...(timeMax ? { timeMax } : {}),
+  });
+  const resp = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
+    { headers: { authorization: `Bearer ${token}` } }
+  );
+  if (!resp.ok) throw new Error(`listEvents failed: ${await resp.text()}`);
+  const data = await resp.json();
+  return (data.items || []).map((e: any) => ({
+    id: e.id,
+    summary: e.summary,
+    start: e.start?.date || e.start?.dateTime,
+    end: e.end?.date || e.end?.dateTime,
+    all_day: !!e.start?.date,
+  }));
+}
+
+export async function deleteEvent(
+  householdId: string,
+  eventId: string,
+  calendar?: string
+) {
+  const token = await getValidAccessToken(householdId);
+  const calendarId = resolveCalendarId(calendar);
+  const resp = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
+    { method: 'DELETE', headers: { authorization: `Bearer ${token}` } }
+  );
+  if (!resp.ok && resp.status !== 404) throw new Error(`deleteEvent failed: ${await resp.text()}`);
+  return { deleted: true, event_id: eventId };
+}
