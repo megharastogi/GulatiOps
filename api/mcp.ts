@@ -57,7 +57,7 @@ const TOOLS = [
   {
     name: 'weekly_digest',
     description:
-      'Generate the full weekly digest: this week + next week of school events, action items, and recent emails. Use this when the user asks for "what is coming up" or "my weekly summary".',
+      'THE default tool for any "what\'s coming up", "what do I need to do", or general household status question. Returns school calendar events AND open action items AND recent emails in one call. Always prefer this over calling list_school_events and list_action_items separately.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
