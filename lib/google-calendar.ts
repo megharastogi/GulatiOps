@@ -85,6 +85,7 @@ export async function createEvent(
     location?: string;
     startIso: string;
     endIso: string;
+    allDay?: boolean;
     inviteEmails?: string[];
     timezone?: string;
     calendar?: string;
@@ -92,12 +93,17 @@ export async function createEvent(
 ) {
   const token = await getValidAccessToken(householdId);
   const calendarId = resolveCalendarId(evt.calendar);
+  const tz = evt.timezone || 'America/Los_Angeles';
+  const startDate = evt.startIso.slice(0, 10);
+  const endDate = evt.allDay
+    ? new Date(new Date(evt.endIso).getTime() + 86400000).toISOString().slice(0, 10)
+    : evt.endIso.slice(0, 10);
   const body: any = {
     summary: evt.summary,
     description: evt.description,
     location: evt.location,
-    start: { dateTime: evt.startIso, timeZone: evt.timezone || 'America/Los_Angeles' },
-    end: { dateTime: evt.endIso, timeZone: evt.timezone || 'America/Los_Angeles' },
+    start: evt.allDay ? { date: startDate } : { dateTime: evt.startIso, timeZone: tz },
+    end: evt.allDay ? { date: endDate } : { dateTime: evt.endIso, timeZone: tz },
   };
   if (evt.inviteEmails?.length) {
     body.attendees = evt.inviteEmails.map((email) => ({ email }));

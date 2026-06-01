@@ -147,6 +147,7 @@ const TOOLS = [
         start_iso: { type: 'string' },
         end_iso: { type: 'string' },
         calendar: { type: 'string', enum: ['personal', 'kian_school'], description: 'Which calendar to add the event to. Ask the user if unclear.' },
+        all_day: { type: 'boolean', description: 'Set true for all-day events like school holidays, days off, spirit days.' },
         invite_emails: {
           type: 'array',
           items: { type: 'string' },
@@ -331,6 +332,7 @@ async function callTool(name: string, args: any) {
         inviteEmails: args.invite_emails,
         timezone: household.timezone,
         calendar: args.calendar,
+        allDay: args.all_day,
       });
       return {
         created: true,
