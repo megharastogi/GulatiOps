@@ -71,10 +71,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 }
 
 function extractLinks(html: string): string[] {
-  const matches = [...html.matchAll(/href="(https?:\/\/[^"]+)"/gi)];
-  return matches
-    .map((m) => m[1])
-    .filter((url) => !/(unsubscribe|optout|click\.email|tracking|open\.php|pixel|beacon)/i.test(url))
+  const matches = [...html.matchAll(/href=["'](https?:\/\/[^"'\s>]+)["']/gi)];
+  return [...new Set(matches.map((m) => m[1]))]
+    .filter((url) => !/(unsubscribe|optout|pixel|beacon|open\.php|mailto)/i.test(url))
     .slice(0, 3);
 }
 
