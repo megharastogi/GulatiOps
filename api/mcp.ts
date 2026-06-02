@@ -121,6 +121,22 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'clear_grocery_list',
+    description: 'Mark all pending grocery items as ordered, clearing the list. Use after an order has been placed.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'remove_grocery_item',
+    description: 'Remove a single item from the pending grocery list by name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item_name: { type: 'string', description: 'Name of the item to remove (substring match)' },
+      },
+      required: ['item_name'],
+    },
+  },
+  {
     name: 'check_calendar_busy',
     description:
       'Check whether a calendar is busy in a given time window. Use BEFORE creating an event to warn about conflicts.',
@@ -340,6 +356,27 @@ async function callTool(name: string, args: any) {
         .eq('ordered', false)
         .order('added_at', { ascending: false });
       return data || [];
+    }
+
+    case 'clear_grocery_list': {
+      const { count } = await supabase
+        .from('grocery_pending')
+        .update({ ordered: true, ordered_at: new Date().toISOString() })
+        .eq('household_id', household.id)
+        .eq('ordered', false);
+      return { cleared: true, items_cleared: count ?? 0 };
+    }
+
+    case 'remove_grocery_item': {
+      const { data, error } = await supabase
+        .from('grocery_pending')
+        .delete()
+        .eq('household_id', household.id)
+        .eq('ordered', false)
+        .ilike('item_name', `%${args.item_name}%`)
+        .select();
+      if (error) throw error;
+      return { removed: true, items_removed: data?.length ?? 0 };
     }
 
     case 'check_calendar_busy': {
