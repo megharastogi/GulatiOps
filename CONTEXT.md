@@ -244,3 +244,9 @@ After seed succeeds:
   Vercel auto-detects api/ directory now
 - Google OAuth shows "unverified app" warning since it's in Testing mode -
   this is fine for personal use, just click Advanced → Continue
+- Because the OAuth consent screen is still in Testing mode, Google expires
+  the refresh token after 7 days. If calendar reads/writes start erroring
+  (e.g. "Token refresh failed"), re-auth at
+  `https://gulati-ops.vercel.app/api/google-oauth` and try again. To stop
+  this recurring, switch the consent screen from Testing to "In production"
+  in Google Cloud Console → APIs & Services → OAuth consent screen.

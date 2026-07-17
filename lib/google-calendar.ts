@@ -31,7 +31,12 @@ async function getValidAccessToken(householdId: string): Promise<string> {
       grant_type: 'refresh_token',
     }),
   });
-  if (!resp.ok) throw new Error(`Token refresh failed: ${await resp.text()}`);
+  if (!resp.ok) {
+    throw new Error(
+      `Token refresh failed: ${await resp.text()}. The Google OAuth consent screen is in Testing mode, ` +
+      `so refresh tokens expire after 7 days. Re-auth at https://gulati-ops.vercel.app/api/google-oauth and try again.`
+    );
+  }
   const tokens = await resp.json();
   const newExpiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
