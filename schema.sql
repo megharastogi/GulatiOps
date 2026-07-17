@@ -146,6 +146,62 @@ create table grocery_pending (
 );
 
 -- ============================================================
+-- TRIP PLANNING
+-- ============================================================
+
+create table trips (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid references households(id) on delete cascade,
+  destination text not null,
+  start_date date not null,
+  end_date date not null,
+  participant_names text[],
+  adult_count int,
+  kid_count int,
+  constraints jsonb default '{}'::jsonb,  -- { nap_start, nap_end, date_night_days: [...], accommodation_address }
+  status text not null default 'planning',  -- 'planning' | 'active' | 'completed'
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create index on trips (household_id, start_date desc);
+
+create table trip_days (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid references trips(id) on delete cascade,
+  household_id uuid references households(id) on delete cascade,
+  date date not null,
+  day_number int not null,
+  is_date_night boolean default false,
+  notes text,
+  created_at timestamptz default now()
+);
+
+create index on trip_days (trip_id, date);
+
+create table trip_activities (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid references trips(id) on delete cascade,
+  trip_day_id uuid references trip_days(id) on delete cascade,
+  household_id uuid references households(id) on delete cascade,
+  slot text not null,                    -- 'morning' | 'afternoon' | 'evening'
+  type text not null,                    -- 'activity' | 'restaurant' | 'date_night_restaurant'
+  name text not null,
+  description text,
+  address text,
+  url text,
+  hours text,
+  is_adults_only boolean default false,
+  reservation_info text,                 -- confirmation numbers, notes
+  priority text not null default 'primary',  -- 'primary' | 'alternate_1' | 'alternate_2'
+  status text not null default 'planned',    -- 'planned' | 'confirmed' | 'completed' | 'cancelled'
+  sort_order int default 0,
+  created_at timestamptz default now()
+);
+
+create index on trip_activities (trip_day_id, slot, priority);
+
+-- ============================================================
 -- AUDIT / NOTIFICATION LOG
 -- ============================================================
 

@@ -204,6 +204,119 @@ const TOOLS = [
       required: ['event_id'],
     },
   },
+  {
+    name: 'create_trip',
+    description:
+      'Save a new trip header and auto-generate its trip_days rows for every date in the range. Call once planning basics (destination, dates, participants, constraints) are known, before saving day activities.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        destination: { type: 'string' },
+        start_date: { type: 'string', description: 'YYYY-MM-DD' },
+        end_date: { type: 'string', description: 'YYYY-MM-DD' },
+        participant_names: { type: 'array', items: { type: 'string' } },
+        adult_count: { type: 'number' },
+        kid_count: { type: 'number' },
+        constraints: {
+          type: 'object',
+          description:
+            'Free-form: nap_start, nap_end (HH:MM), date_night_days (array of YYYY-MM-DD), accommodation_address, etc.',
+        },
+      },
+      required: ['destination', 'start_date', 'end_date'],
+    },
+  },
+  {
+    name: 'save_trip_day_activities',
+    description:
+      'Save or replace the full set of activities (primary + alternates) for one trip day. Replaces whatever was previously saved for that day.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        trip_id: { type: 'string' },
+        date: { type: 'string', description: 'YYYY-MM-DD, must match an existing trip_day' },
+        activities: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              slot: { type: 'string', enum: ['morning', 'afternoon', 'evening'] },
+              type: { type: 'string', enum: ['activity', 'restaurant', 'date_night_restaurant'] },
+              name: { type: 'string' },
+              description: { type: 'string' },
+              address: { type: 'string' },
+              url: { type: 'string' },
+              hours: { type: 'string' },
+              is_adults_only: { type: 'boolean' },
+              reservation_info: { type: 'string' },
+              priority: { type: 'string', enum: ['primary', 'alternate_1', 'alternate_2'], description: 'Default: primary' },
+              status: { type: 'string', enum: ['planned', 'confirmed', 'completed', 'cancelled'], description: 'Default: planned' },
+            },
+            required: ['slot', 'type', 'name'],
+          },
+        },
+      },
+      required: ['trip_id', 'date', 'activities'],
+    },
+  },
+  {
+    name: 'get_trip_itinerary',
+    description:
+      'Return a trip\'s itinerary — the full trip or a single day. Returns primary activities only unless include_alternates is set (e.g. user asks "what are my backups for dinner?").',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        trip_id: { type: 'string' },
+        date: { type: 'string', description: 'YYYY-MM-DD. Omit for the full trip.' },
+        include_alternates: { type: 'boolean', default: false },
+      },
+      required: ['trip_id'],
+    },
+  },
+  {
+    name: 'update_trip_activity',
+    description:
+      'Update, cancel, or swap a single trip activity. Pass fields to change directly, or pass swap_with_id to swap priority (e.g. promote an alternate to primary) between two activities.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        activity_id: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        address: { type: 'string' },
+        url: { type: 'string' },
+        hours: { type: 'string' },
+        reservation_info: { type: 'string' },
+        priority: { type: 'string', enum: ['primary', 'alternate_1', 'alternate_2'] },
+        status: { type: 'string', enum: ['planned', 'confirmed', 'completed', 'cancelled'] },
+        is_adults_only: { type: 'boolean' },
+        slot: { type: 'string', enum: ['morning', 'afternoon', 'evening'] },
+        swap_with_id: { type: 'string', description: 'Activity id to swap priority with, e.g. to promote an alternate.' },
+      },
+      required: ['activity_id'],
+    },
+  },
+  {
+    name: 'list_trips',
+    description: 'List past and upcoming trips, optionally filtered by status. Use for post-trip recall ("what did we do in...").',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['planning', 'active', 'completed'] },
+      },
+    },
+  },
+  {
+    name: 'delete_trip',
+    description: 'Delete a trip and all its days and activities.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        trip_id: { type: 'string' },
+      },
+      required: ['trip_id'],
+    },
+  },
 ];
 
 // -------- tool implementations --------
@@ -419,6 +532,179 @@ async function callTool(name: string, args: any) {
 
     case 'delete_calendar_event': {
       return await deleteEvent(household.id, args.event_id, args.calendar);
+    }
+
+    case 'create_trip': {
+      const { data: trip } = await supabase
+        .from('trips')
+        .insert({
+          household_id: household.id,
+          destination: args.destination,
+          start_date: args.start_date,
+          end_date: args.end_date,
+          participant_names: args.participant_names || [],
+          adult_count: args.adult_count,
+          kid_count: args.kid_count,
+          constraints: args.constraints || {},
+        })
+        .select()
+        .single();
+
+      const dateNightDays = new Set(trip.constraints?.date_night_days || []);
+      const rows = [];
+      let dayNumber = 1;
+      for (
+        let d = new Date(`${args.start_date}T00:00:00Z`);
+        d <= new Date(`${args.end_date}T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + 1)
+      ) {
+        const dateStr = d.toISOString().slice(0, 10);
+        rows.push({
+          trip_id: trip.id,
+          household_id: household.id,
+          date: dateStr,
+          day_number: dayNumber++,
+          is_date_night: dateNightDays.has(dateStr),
+        });
+      }
+      const { data: tripDays } = await supabase.from('trip_days').insert(rows).select();
+      return { trip, trip_days: tripDays || [] };
+    }
+
+    case 'save_trip_day_activities': {
+      const { data: day } = await supabase
+        .from('trip_days')
+        .select('id')
+        .eq('trip_id', args.trip_id)
+        .eq('household_id', household.id)
+        .eq('date', args.date)
+        .single();
+      if (!day) return { error: 'No trip_day found for that trip_id/date' };
+
+      await supabase.from('trip_activities').delete().eq('trip_day_id', day.id);
+
+      const rows = (args.activities || []).map((a: any, i: number) => ({
+        trip_id: args.trip_id,
+        trip_day_id: day.id,
+        household_id: household.id,
+        slot: a.slot,
+        type: a.type,
+        name: a.name,
+        description: a.description,
+        address: a.address,
+        url: a.url,
+        hours: a.hours,
+        is_adults_only: a.is_adults_only || false,
+        reservation_info: a.reservation_info,
+        priority: a.priority || 'primary',
+        status: a.status || 'planned',
+        sort_order: a.sort_order ?? i,
+      }));
+      const { data } = await supabase.from('trip_activities').insert(rows).select();
+      return { saved: true, activities: data || [] };
+    }
+
+    case 'get_trip_itinerary': {
+      const { data: trip } = await supabase
+        .from('trips')
+        .select('*')
+        .eq('id', args.trip_id)
+        .eq('household_id', household.id)
+        .single();
+      if (!trip) return { error: 'Trip not found' };
+
+      let dayQuery = supabase
+        .from('trip_days')
+        .select('*')
+        .eq('trip_id', args.trip_id)
+        .order('day_number', { ascending: true });
+      if (args.date) dayQuery = dayQuery.eq('date', args.date);
+      const { data: days } = await dayQuery;
+
+      const dayIds = (days || []).map((d: any) => d.id);
+      let activities: any[] = [];
+      if (dayIds.length) {
+        let actQuery = supabase
+          .from('trip_activities')
+          .select('*')
+          .in('trip_day_id', dayIds)
+          .order('sort_order', { ascending: true });
+        if (!args.include_alternates) actQuery = actQuery.eq('priority', 'primary');
+        const { data } = await actQuery;
+        activities = data || [];
+      }
+
+      const activitiesByDay: Record<string, any[]> = {};
+      for (const a of activities) {
+        (activitiesByDay[a.trip_day_id] ||= []).push(a);
+      }
+
+      return {
+        trip,
+        days: (days || []).map((d: any) => ({ ...d, activities: activitiesByDay[d.id] || [] })),
+      };
+    }
+
+    case 'update_trip_activity': {
+      if (args.swap_with_id) {
+        const { data: a } = await supabase
+          .from('trip_activities')
+          .select('id, priority')
+          .eq('id', args.activity_id)
+          .eq('household_id', household.id)
+          .single();
+        const { data: b } = await supabase
+          .from('trip_activities')
+          .select('id, priority')
+          .eq('id', args.swap_with_id)
+          .eq('household_id', household.id)
+          .single();
+        if (!a || !b) return { error: 'Activity not found' };
+        await supabase.from('trip_activities').update({ priority: b.priority }).eq('id', a.id);
+        await supabase.from('trip_activities').update({ priority: a.priority }).eq('id', b.id);
+        return { swapped: true, activity_id: a.id, swapped_with: b.id };
+      }
+
+      const updates: any = {};
+      for (const key of [
+        'name',
+        'description',
+        'address',
+        'url',
+        'hours',
+        'reservation_info',
+        'priority',
+        'status',
+        'is_adults_only',
+        'slot',
+      ]) {
+        if (args[key] !== undefined) updates[key] = args[key];
+      }
+      const { data } = await supabase
+        .from('trip_activities')
+        .update(updates)
+        .eq('id', args.activity_id)
+        .eq('household_id', household.id)
+        .select()
+        .single();
+      return { updated: data };
+    }
+
+    case 'list_trips': {
+      let q = supabase.from('trips').select('*').eq('household_id', household.id);
+      if (args.status) q = q.eq('status', args.status);
+      const { data } = await q.order('start_date', { ascending: false });
+      return data || [];
+    }
+
+    case 'delete_trip': {
+      const { error } = await supabase
+        .from('trips')
+        .delete()
+        .eq('id', args.trip_id)
+        .eq('household_id', household.id);
+      if (error) throw error;
+      return { deleted: true, trip_id: args.trip_id };
     }
 
     default:
