@@ -1,11 +1,10 @@
-// /api/inbound-email.ts
 // Receives forwarded emails from Cloudflare Email Workers.
 // Cloudflare Worker POSTs JSON: { from, to, subject, text, html, headers }
 
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { Resend } from 'resend';
+import { getHousehold } from '@/lib/household';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -15,24 +14,20 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 // Verify the request actually came from your Cloudflare Worker
-function verifySharedSecret(req: VercelRequest): boolean {
-  return req.headers['x-cof-secret'] === process.env.INBOUND_SHARED_SECRET;
+function verifySharedSecret(request: Request): boolean {
+  return request.headers.get('x-cof-secret') === process.env.INBOUND_SHARED_SECRET;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') return res.status(405).end();
-  if (!verifySharedSecret(req)) return res.status(401).end();
+export async function POST(request: Request) {
+  if (!verifySharedSecret(request)) return new Response(null, { status: 401 });
 
-  const { from, fromName, to, subject, text, html, headers } = req.body;
+  const { from, fromName, to, subject, text, html, headers } = await request.json();
 
   // For single-household MVP, resolve household by the `to` address
-  const { data: household } = await supabase
-    .from('households')
-    .select('*')
-    .eq('digest_email', process.env.PRIMARY_DIGEST_EMAIL!)
-    .single();
-
-  if (!household) return res.status(500).json({ error: 'no household configured' });
+  const household = await getHousehold().catch(() => null);
+  if (!household) {
+    return Response.json({ error: 'no household configured' }, { status: 500 });
+  }
 
   // 1. Store raw email immediately (durability before parsing)
   const { data: emailRow, error: insertErr } = await supabase
@@ -52,7 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (insertErr) {
     console.error('insert failed', insertErr);
-    return res.status(500).json({ error: 'insert failed' });
+    return Response.json({ error: 'insert failed' }, { status: 500 });
   }
 
   // 2. Respond 200 fast — parse async (Vercel functions don't truly do background
@@ -67,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('id', emailRow.id);
   }
 
-  return res.status(200).json({ ok: true, email_id: emailRow.id });
+  return Response.json({ ok: true, email_id: emailRow.id });
 }
 
 function extractLinks(html: string): string[] {
@@ -82,7 +77,7 @@ async function fetchNewsletterContent(url: string): Promise<string> {
     // Use Jina Reader to handle JS-rendered pages (Smore, Peachjar, etc.)
     const readerUrl = `https://r.jina.ai/${url}`;
     const res = await fetch(readerUrl, {
-      headers: { 'Accept': 'text/plain' },
+      headers: { Accept: 'text/plain' },
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) return '';
@@ -105,7 +100,7 @@ async function parseAndProcessEmail(emailId: string, household: any) {
   const links = extractLinks(email.body_html || '');
   const linkedContents = await Promise.all(links.map(fetchNewsletterContent));
   const newsletterSection = linkedContents
-    .map((c, i) => c ? `\nLinked page ${i + 1} (${links[i]}):\n${c}` : '')
+    .map((c, i) => (c ? `\nLinked page ${i + 1} (${links[i]}):\n${c}` : ''))
     .filter(Boolean)
     .join('\n');
 
@@ -233,6 +228,8 @@ Rules:
 }
 
 async function sendPerEmailSummary(household: any, email: any, parsed: any) {
+  if (!resend) return;
+
   const urgencyBadge =
     parsed.classification === 'action_required' ? '⚡ Action needed' : 'ℹ️ Heads up';
 

@@ -6,7 +6,13 @@ A personal "chief of staff" agent for the Gulati household. School emails get
 forwarded to a dedicated address, parsed by Claude into structured data
 (school events, action items), and made queryable via an MCP server connected
 to a dedicated chat on claude.ai. Also manages Google Calendar with conflict
-checks.
+checks and trip planning.
+
+As of 2026-07-17, there's also a proactive **dashboard PWA** (`app/dashboard`)
+so Megha doesn't have to remember to ask the chat for status — home screen on
+iOS, magic-link sign-in, tabs for upcoming/todo/groceries/trips. Chat (via
+MCP) remains the interface for actions and conversational planning; the
+dashboard is for glanceable status. See "Dashboard PWA" section below.
 
 ## Owner
 
@@ -28,22 +34,35 @@ chief@gulatiops.org  (Cloudflare Email Routing)
 Cloudflare Email Worker  (parses MIME, POSTs JSON)
        |
        v
-Vercel: /api/inbound-email
+Vercel: /api/inbound-email (app/api/inbound-email/route.ts)
        |
        +--> Supabase: inbound_emails (raw)
        +--> Anthropic API (Claude Opus 4.5 parser)
        +--> Supabase: school_calendar, action_items
        +--> Resend (per-email summary to Megha's inbox)
 
-User interaction:
+Conversational interaction:
        Megha on claude.ai (GulatiOps project)
               |
               v (MCP over HTTPS)
-       Vercel: /api/mcp
+       Vercel: /api/mcp (app/api/mcp/route.ts)
               |
               +--> Supabase queries/mutations
               +--> Google Calendar API (freeBusy + events)
+
+Proactive/glanceable interaction:
+       Megha's iPhone home screen (installed PWA)
+              |
+              v
+       Vercel: /dashboard/* (Next.js App Router, Supabase Auth magic link)
+              |
+              +--> Supabase queries/mutations (same tables as MCP tools)
 ```
+
+The whole app is now a single Next.js project deployed to Vercel — the
+`/api/*` endpoints above are Next.js Route Handlers (`app/api/*/route.ts`),
+not standalone `@vercel/node` functions anymore (migrated 2026-07-17 so they
+deploy unambiguously alongside the dashboard frontend).
 
 ## Current setup state
 
@@ -62,7 +81,7 @@ User interaction:
 - Anthropic API key obtained
 - All Vercel env vars set EXCEPT possibly Resend (skipped for now)
 - `vercel.json` was removed because it broke the build; Vercel auto-detects
-  `api/` directory now
+  the project now (Next.js framework preset as of 2026-07-17)
 
 ### In progress
 - Running `npm run seed` to insert household + members into Supabase
@@ -87,20 +106,40 @@ User interaction:
 ```
 GulatiOps/
 ├── README.md                       (setup instructions)
-├── package.json                    (deps + seed script)
+├── package.json                    (deps + scripts)
+├── next.config.mjs
 ├── tsconfig.json
+├── middleware.ts                    (Supabase Auth session refresh + /dashboard gate)
 ├── .gitignore
 ├── .env.example
-├── .env                           (local only, not in git)
-├── supabase/
-│   └── schema.sql                  (full DB schema, already applied)
-├── api/
-│   ├── inbound-email.ts            (Cloudflare Worker POSTs here)
-│   ├── mcp.ts                      (MCP server for claude.ai)
-│   ├── google-oauth.ts             (kicks off OAuth)
-│   └── google-callback.ts          (stores tokens)
+├── .env                            (local only, not in git)
+├── schema.sql                       (full DB schema, already applied)
+├── app/
+│   ├── layout.tsx / globals.css     (root layout, PWA meta tags)
+│   ├── page.tsx                     (redirects to /dashboard)
+│   ├── login/                       (magic-link sign-in form + server action)
+│   ├── auth/callback/route.ts       (exchanges Supabase magic-link code for a session)
+│   ├── dashboard/
+│   │   ├── layout.tsx               (tab nav: Home/Todo/Groceries/Trips, sign out)
+│   │   ├── page.tsx                 (home: upcoming events + open action items)
+│   │   ├── todo/                    (action items list, add, mark done)
+│   │   ├── groceries/               (grocery_pending list, add/remove/clear)
+│   │   └── trips/                   (trip list + [id] itinerary view)
+│   └── api/                         (Route Handlers — same URLs as before the migration)
+│       ├── inbound-email/route.ts   (Cloudflare Worker POSTs here)
+│       ├── mcp/route.ts             (MCP server for claude.ai)
+│       ├── google-oauth/route.ts    (kicks off OAuth)
+│       └── google-callback/route.ts (stores tokens)
 ├── lib/
-│   └── google-calendar.ts          (token refresh + freeBusy + createEvent)
+│   ├── google-calendar.ts           (token refresh + freeBusy + createEvent)
+│   ├── household.ts                 (shared single-household resolver)
+│   └── supabase/
+│       ├── browser.ts                (anon-key client for the login form)
+│       ├── server.ts                 (anon-key client for Server Components/Actions)
+│       ├── admin.ts                  (service-role client for dashboard data queries)
+│       └── middleware.ts             (session refresh helper used by middleware.ts)
+├── public/
+│   └── manifest.webmanifest         (PWA manifest — icon PNGs not yet added, see below)
 ├── emails/
 │   └── cloudflare-email-worker.js  (paste into CF Workers editor)
 └── scripts/
@@ -122,34 +161,42 @@ Key tables in Supabase (full DDL in `supabase/schema.sql`):
 
 ## MCP tools exposed
 
-Defined in `api/mcp.ts`:
+Defined in `app/api/mcp/route.ts` (21 tools):
 
 - `list_action_items` - filter by status/due date
 - `list_school_events` - date range, event types
 - `weekly_digest` - combined view: 2 weeks of events + open actions + recent emails
 - `recent_emails` - filter by classification
 - `add_action_item`, `mark_action_done`
-- `add_grocery_item`, `list_grocery_pending`
+- `add_grocery_item`, `list_grocery_pending`, `clear_grocery_list`, `remove_grocery_item`
 - `check_calendar_busy` - Google freeBusy check
 - `create_calendar_event` - creates event, only invites when explicitly passed
+- `list_calendar_events`, `delete_calendar_event`
 - `list_household_members`
+- `create_trip`, `save_trip_day_activities`, `get_trip_itinerary`,
+  `update_trip_activity`, `list_trips`, `delete_trip` - trip planning (see
+  memory `project-trip-planning-spec` for the full spec)
 
 ## Env vars (Vercel)
-
-All set EXCEPT possibly RESEND_API_KEY:
 
 ```
 SUPABASE_URL
 SUPABASE_SERVICE_ROLE_KEY
+NEXT_PUBLIC_SUPABASE_URL       (same value as SUPABASE_URL, exposed to browser — dashboard login)
+NEXT_PUBLIC_SUPABASE_ANON_KEY  (Supabase Project Settings -> API -> "anon public" key, NOT service role)
 ANTHROPIC_API_KEY
 RESEND_API_KEY                 (not yet)
-PRIMARY_DIGEST_EMAIL           (Megha's real Gmail)
+PRIMARY_DIGEST_EMAIL           (Megha's real Gmail — also the only email allowed to request a dashboard magic link)
 INBOUND_SHARED_SECRET          (openssl rand -hex 32, also goes to CF Worker)
 MCP_SHARED_SECRET              (openssl rand -hex 32, also goes to claude.ai connector header)
 GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET
 GOOGLE_REDIRECT_URI=https://gulati-ops.vercel.app/api/google-callback
 ```
+
+`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` are new as of the
+dashboard PWA (2026-07-17) and still need to be added in Vercel — see
+"Dashboard PWA" section below.
 
 ## Key design decisions made along the way
 
@@ -235,6 +282,38 @@ After seed succeeds:
    - Create Project "GulatiOps" with this connector enabled
    - Add project instructions about Megha's preferences (terse, logistical,
      don't auto-invite husband, etc.)
+
+## Dashboard PWA (built 2026-07-17, not yet deployed/configured)
+
+Code is done and builds cleanly, but needs manual setup before it works in
+production:
+
+1. **Add env vars in Vercel**: `NEXT_PUBLIC_SUPABASE_URL` (same value as
+   `SUPABASE_URL`) and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (Supabase dashboard ->
+   Project Settings -> API -> "anon public" key). Redeploy after adding.
+2. **Enable magic-link email in Supabase**: Supabase dashboard -> Authentication
+   -> Providers -> Email should be enabled by default, but confirm "Confirm
+   email" / OTP settings are on. Authentication -> URL Configuration -> set
+   **Site URL** to `https://gulati-ops.vercel.app` and add
+   `https://gulati-ops.vercel.app/auth/callback` to **Redirect URLs**
+   (magic-link sign-in will fail with a redirect mismatch otherwise).
+3. **Restrict/disable public signup** (defense in depth): the login server
+   action already rejects any email that isn't `PRIMARY_DIGEST_EMAIL`, but
+   consider also turning off "Allow new user signups" in Supabase Auth
+   settings since this is single-user.
+4. **App icons**: `public/manifest.webmanifest` references
+   `/icons/icon-192.png`, `/icons/icon-512.png`, and layout metadata
+   references `/icons/apple-touch-icon.png` — none of these image files
+   exist yet. Add real PNGs at those paths for a proper home-screen icon;
+   until then iOS "Add to Home Screen" will fall back to a page screenshot.
+5. **Install on iPhone**: visit `https://gulati-ops.vercel.app/dashboard` in
+   Safari, sign in via magic link, then Share -> Add to Home Screen.
+
+Push notifications for urgent items (the original motivation for going
+native/PWA) are **not built yet** — this phase only gets the dashboard
+installable and pull-based (open it, see status). Push requires its own
+design pass: what counts as "urgent," VAPID keys + service worker push
+handler, and a backend job/cron to trigger sends.
 
 ## Known quirks
 

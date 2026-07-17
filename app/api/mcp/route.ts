@@ -1,26 +1,14 @@
-// /api/mcp.ts
 // HTTP MCP server. Exposes household tools to Claude.
 // Connect this URL to claude.ai as a custom connector.
 
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { checkBusy, createEvent, listEvents, deleteEvent } from '../lib/google-calendar.js';
+import { checkBusy, createEvent, listEvents, deleteEvent } from '@/lib/google-calendar';
+import { getHousehold } from '@/lib/household';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-// -------- household resolver --------
-async function getHousehold() {
-  const { data } = await supabase
-    .from('households')
-    .select('*')
-    .eq('digest_email', process.env.PRIMARY_DIGEST_EMAIL!)
-    .single();
-  if (!data) throw new Error('Household not seeded.');
-  return data;
-}
 
 // -------- tool definitions --------
 const TOOLS = [
@@ -713,22 +701,21 @@ async function callTool(name: string, args: any) {
 }
 
 // -------- MCP JSON-RPC handler --------
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function POST(request: Request) {
   // Accept secret via header or query param (claude.ai connector UI doesn't support headers)
   if (process.env.MCP_SHARED_SECRET) {
-    const provided = req.headers['x-mcp-secret'] || req.query['secret'];
+    const { searchParams } = new URL(request.url);
+    const provided = request.headers.get('x-mcp-secret') || searchParams.get('secret');
     if (provided !== process.env.MCP_SHARED_SECRET) {
-      return res.status(401).json({ error: 'unauthorized' });
+      return Response.json({ error: 'unauthorized' }, { status: 401 });
     }
   }
 
-  if (req.method !== 'POST') return res.status(405).end();
-
-  const { id, method, params } = req.body;
+  const { id, method, params } = await request.json();
 
   try {
     if (method === 'initialize') {
-      return res.json({
+      return Response.json({
         jsonrpc: '2.0',
         id,
         result: {
@@ -740,12 +727,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (method === 'tools/list') {
-      return res.json({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
+      return Response.json({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
     }
 
     if (method === 'tools/call') {
       const result = await callTool(params.name, params.arguments || {});
-      return res.json({
+      return Response.json({
         jsonrpc: '2.0',
         id,
         result: {
@@ -754,13 +741,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    return res.json({
+    return Response.json({
       jsonrpc: '2.0',
       id,
       error: { code: -32601, message: `Method not found: ${method}` },
     });
   } catch (e: any) {
-    return res.json({
+    return Response.json({
       jsonrpc: '2.0',
       id,
       error: { code: -32000, message: e.message || String(e) },

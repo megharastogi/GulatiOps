@@ -22,7 +22,7 @@ Calendar events with conflict checks.
 ### 1. Supabase
 
 1. Create a new project at supabase.com.
-2. Open SQL editor, paste `supabase/schema.sql`, run.
+2. Open SQL editor, paste `schema.sql`, run.
 3. Copy your project URL, anon key, and **service role key** (the powerful one).
    You'll put the service role key in Vercel env vars — never client-side.
 
@@ -111,6 +111,20 @@ parser, *then* enable the filter.
    > date is always the current date.
 
 That project's chat is now your interface. Voice-message it from mobile.
+
+### 9. Dashboard PWA (glanceable, install to iPhone home screen)
+
+1. In Vercel env vars, add `NEXT_PUBLIC_SUPABASE_URL` (same as `SUPABASE_URL`)
+   and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (Supabase → Project Settings → API →
+   "anon public" key, not the service role key). Redeploy.
+2. Supabase → Authentication → URL Configuration → set **Site URL** to your
+   Vercel URL and add `<your-vercel-url>/auth/callback` to **Redirect URLs**.
+3. Visit `<your-vercel-url>/dashboard` in Safari on your iPhone, sign in with
+   the magic link sent to `PRIMARY_DIGEST_EMAIL`, then Share → Add to Home
+   Screen.
+
+See `CONTEXT.md` → "Dashboard PWA" for the rest (app icons still needed,
+push notifications not built yet).
 
 ---
 
