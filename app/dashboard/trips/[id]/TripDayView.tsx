@@ -5,9 +5,11 @@ import {
   ACTIVITY_SLOTS,
   ACTIVITY_TYPES,
   ACTIVITY_STATUSES,
+  ACTIVITY_PARTICIPANTS,
   type ActivitySlot,
   type ActivityType,
   type ActivityStatus,
+  type ActivityParticipants,
 } from '@/lib/trip-constants';
 import {
   updateTripNotes,
@@ -32,6 +34,7 @@ type TripActivity = {
   hours: string | null;
   start_time: string | null;
   end_time: string | null;
+  participants: string;
   is_adults_only: boolean;
   reservation_info: string | null;
   status: string;
@@ -63,6 +66,19 @@ const TYPE_LABEL: Record<string, string> = {
   activity: 'Activity',
   restaurant: 'Restaurant',
   date_night_restaurant: 'Date Night',
+};
+
+const TYPE_ICON: Record<string, string> = {
+  activity: '📍',
+  restaurant: '🍽',
+  date_night_restaurant: '💕',
+};
+
+const PARTICIPANTS_LABEL: Record<string, string> = {
+  everyone: 'Everyone',
+  adults_only: 'Adults only',
+  kids_only: 'Kids only',
+  kids_with_nanny: 'Kids + nanny',
 };
 
 const PX_PER_MIN = 1.1;
@@ -115,15 +131,18 @@ type PositionedActivity = TripActivity & {
   endMin: number;
   col: number;
   numCols: number;
+  conflict: boolean;
 };
 
 // Clusters mutually-overlapping activities and assigns each a column within
 // its cluster (classic calendar-day-view layout algorithm), so overlapping
-// blocks sit side-by-side instead of stacking on top of each other.
+// blocks sit side-by-side instead of stacking on top of each other. Overlap
+// alone isn't a scheduling conflict here — a parent's adults_only errand next
+// to kids_with_nanny time is the plan working as intended. Only overlaps
+// where the *same* participants group double-books are flagged as conflicts.
 function layoutOverlaps(items: (TripActivity & { startMin: number; endMin: number })[]): PositionedActivity[] {
   const sorted = [...items].sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
-  const result: PositionedActivity[] = [];
-  let clusterStart = 0;
+  const positioned: (TripActivity & { startMin: number; endMin: number; col: number; numCols: number })[] = [];
   let clusterEnd = -1;
 
   const flushCluster = (cluster: (TripActivity & { startMin: number; endMin: number })[]) => {
@@ -139,7 +158,7 @@ function layoutOverlaps(items: (TripActivity & { startMin: number; endMin: numbe
       return { ...item, col };
     });
     const numCols = columnEnds.length;
-    for (const item of withCol) result.push({ ...item, numCols });
+    for (const item of withCol) positioned.push({ ...item, numCols });
   };
 
   let cluster: (TripActivity & { startMin: number; endMin: number })[] = [];
@@ -155,7 +174,16 @@ function layoutOverlaps(items: (TripActivity & { startMin: number; endMin: numbe
   }
   if (cluster.length) flushCluster(cluster);
 
-  return result;
+  return positioned.map((item) => ({
+    ...item,
+    conflict: positioned.some(
+      (other) =>
+        other.id !== item.id &&
+        other.participants === item.participants &&
+        item.startMin < other.endMin &&
+        other.startMin < item.endMin
+    ),
+  }));
 }
 
 export default function TripDayView({
@@ -235,6 +263,7 @@ export default function TripDayView({
     const fields: ActivityInput = {
       slot: (fd.get('slot') as ActivitySlot) || 'morning',
       type: (fd.get('type') as ActivityType) || 'activity',
+      participants: (fd.get('participants') as ActivityParticipants) || 'everyone',
       name: String(fd.get('name') || ''),
       start_time: String(fd.get('start_time') || '') || null,
       end_time: String(fd.get('end_time') || '') || null,
@@ -256,6 +285,7 @@ export default function TripDayView({
     const fields: Partial<ActivityInput> = {
       slot: (fd.get('slot') as ActivitySlot) || undefined,
       type: (fd.get('type') as ActivityType) || undefined,
+      participants: (fd.get('participants') as ActivityParticipants) || undefined,
       name: String(fd.get('name') || ''),
       start_time: String(fd.get('start_time') || '') || null,
       end_time: String(fd.get('end_time') || '') || null,
@@ -366,15 +396,22 @@ export default function TripDayView({
                   const height = Math.max(MIN_BLOCK_MIN, a.endMin - a.startMin) * PX_PER_MIN;
                   const width = `calc(${100 / a.numCols}% - 4px)`;
                   const left = `calc(${(a.col / a.numCols) * 100}% + 2px)`;
+                  const participantsClass = ACTIVITY_PARTICIPANTS.includes(a.participants as ActivityParticipants)
+                    ? a.participants
+                    : 'everyone';
                   return (
                     <button
                       key={a.id}
                       type="button"
-                      className={`activity-block activity-block--${a.type}`}
+                      className={`activity-block activity-block--${participantsClass}${a.conflict ? ' activity-block--conflict' : ''}`}
                       style={{ top, height, width, left }}
                       onClick={() => setEditingId(a.id)}
+                      title={a.conflict ? 'Conflicts with another activity for the same people' : undefined}
                     >
-                      <span className="activity-name">{a.name}</span>
+                      <span className="activity-name">
+                        {a.conflict && <span className="conflict-flag">⚠ </span>}
+                        {TYPE_ICON[a.type] ?? ''} {a.name}
+                      </span>
                       {a.address && <span>{a.address}</span>}
                     </button>
                   );
@@ -386,6 +423,16 @@ export default function TripDayView({
               Nothing scheduled yet — add a time below or use the Unscheduled list.
             </p>
           )}
+
+          <div className="who-legend">
+            {ACTIVITY_PARTICIPANTS.map((p) => (
+              <span key={p}>
+                <span className="who-legend-dot" style={{ background: `var(--who-${p})` }} />
+                {PARTICIPANTS_LABEL[p]}
+              </span>
+            ))}
+            <span>⚠ = same people double-booked</span>
+          </div>
 
           {unscheduled.length > 0 && (
             <div>
@@ -417,7 +464,15 @@ export default function TripDayView({
                       <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase' }}>
                         {SLOT_LABEL[a.slot] ?? a.slot} · {TYPE_LABEL[a.type] ?? a.type}
                       </div>
-                      <div style={{ fontWeight: 600 }}>{a.name}</div>
+                      <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {a.name}
+                        <span
+                          className="who-tag"
+                          style={{ background: `var(--who-${ACTIVITY_PARTICIPANTS.includes(a.participants as ActivityParticipants) ? a.participants : 'everyone'})` }}
+                        >
+                          {PARTICIPANTS_LABEL[a.participants] ?? 'Everyone'}
+                        </span>
+                      </div>
                       {a.hours && <div className="muted" style={{ fontSize: 13 }}>{a.hours}</div>}
                     </button>
                   </div>
@@ -449,9 +504,26 @@ export default function TripDayView({
                   ))}
                 </select>
               </div>
+              <select name="participants" style={inputStyle} defaultValue="everyone">
+                {ACTIVITY_PARTICIPANTS.map((p) => (
+                  <option key={p} value={p}>
+                    {PARTICIPANTS_LABEL[p]}
+                  </option>
+                ))}
+              </select>
               <div style={{ display: 'flex', gap: 8 }}>
-                <input name="start_time" type="time" style={inputStyle} />
-                <input name="end_time" type="time" style={inputStyle} />
+                <div style={{ flex: 1 }}>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>
+                    Start
+                  </div>
+                  <TimeSelect name="start_time" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>
+                    End
+                  </div>
+                  <TimeSelect name="end_time" />
+                </div>
               </div>
               <input name="address" placeholder="Address (optional)" style={inputStyle} />
               <input name="url" placeholder="Link (optional)" style={inputStyle} />
@@ -519,19 +591,26 @@ export default function TripDayView({
                 ))}
               </select>
             </div>
+            <select name="participants" defaultValue={editingActivity.participants || 'everyone'} style={inputStyle}>
+              {ACTIVITY_PARTICIPANTS.map((p) => (
+                <option key={p} value={p}>
+                  {PARTICIPANTS_LABEL[p]}
+                </option>
+              ))}
+            </select>
             <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                name="start_time"
-                type="time"
-                defaultValue={minutesToTimeInput(parseMinutes(editingActivity.start_time))}
-                style={inputStyle}
-              />
-              <input
-                name="end_time"
-                type="time"
-                defaultValue={minutesToTimeInput(parseMinutes(editingActivity.end_time))}
-                style={inputStyle}
-              />
+              <div style={{ flex: 1 }}>
+                <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>
+                  Start
+                </div>
+                <TimeSelect name="start_time" defaultValue={editingActivity.start_time} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>
+                  End
+                </div>
+                <TimeSelect name="end_time" defaultValue={editingActivity.end_time} />
+              </div>
             </div>
             <input name="address" defaultValue={editingActivity.address ?? ''} placeholder="Address" style={inputStyle} />
             <input name="url" defaultValue={editingActivity.url ?? ''} placeholder="Link" style={inputStyle} />
@@ -581,3 +660,59 @@ const inputStyle: React.CSSProperties = {
   padding: '8px 10px',
   fontSize: 14,
 };
+
+const HOURS_12 = Array.from({ length: 12 }, (_, i) => String(i + 1));
+const MINUTE_STEPS = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'));
+
+// Custom hour/minute/AM-PM dropdown picker. Replaces the native
+// <input type="time">, whose rendering (segmented text vs. wheel vs.
+// icon-triggered popover, and icon visibility in dark mode) varies too
+// much across browsers/OS to be a reliable "picker" experience. Plain
+// <select> elements render consistently and visibly everywhere. Submits
+// as a single "HH:MM" 24h string via a hidden input, so form-level
+// FormData reads (`fd.get(name)`) work unchanged.
+function TimeSelect({ name, defaultValue }: { name: string; defaultValue?: string | null }) {
+  const initMin = parseMinutes(defaultValue ?? null);
+  const initHour24 = initMin != null ? Math.floor(initMin / 60) : null;
+  const [hour12, setHour12] = useState(
+    initHour24 != null ? String(initHour24 % 12 === 0 ? 12 : initHour24 % 12) : ''
+  );
+  const [minute, setMinute] = useState(initMin != null ? String(initMin % 60).padStart(2, '0') : '');
+  const [ampm, setAmpm] = useState(initHour24 != null ? (initHour24 < 12 ? 'AM' : 'PM') : '');
+
+  let value = '';
+  if (hour12 && minute !== '' && ampm) {
+    let h = Number(hour12) % 12;
+    if (ampm === 'PM') h += 12;
+    value = `${String(h).padStart(2, '0')}:${minute}`;
+  }
+
+  const selectStyle: React.CSSProperties = { ...inputStyle, padding: '8px 4px', textAlign: 'center' };
+
+  return (
+    <div style={{ display: 'flex', gap: 4 }}>
+      <input type="hidden" name={name} value={value} />
+      <select value={hour12} onChange={(e) => setHour12(e.target.value)} style={selectStyle} aria-label="Hour">
+        <option value="">Hr</option>
+        {HOURS_12.map((h) => (
+          <option key={h} value={h}>
+            {h}
+          </option>
+        ))}
+      </select>
+      <select value={minute} onChange={(e) => setMinute(e.target.value)} style={selectStyle} aria-label="Minute">
+        <option value="">Min</option>
+        {MINUTE_STEPS.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+      <select value={ampm} onChange={(e) => setAmpm(e.target.value)} style={selectStyle} aria-label="AM/PM">
+        <option value="">--</option>
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </div>
+  );
+}

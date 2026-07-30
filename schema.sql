@@ -194,7 +194,8 @@ create table trip_activities (
   hours text,                            -- free-text fallback (e.g. "9am-5pm") when start_time/end_time aren't set
   start_time time,                       -- for the hourly grid view; null = shows in "Unscheduled"
   end_time time,                         -- must be > start_time; cross-midnight activities can't be represented, use hours instead
-  is_adults_only boolean default false,
+  participants text not null default 'everyone',  -- 'everyone' | 'adults_only' | 'kids_only' | 'kids_with_nanny' — drives grid color + conflict detection; supersedes is_adults_only below
+  is_adults_only boolean default false,  -- legacy; kept for back-compat, prefer participants
   reservation_info text,                 -- confirmation numbers, notes
   priority text not null default 'primary',  -- 'primary' | 'alternate_1' | 'alternate_2'
   status text not null default 'planned',    -- 'planned' | 'confirmed' | 'completed' | 'cancelled'
@@ -227,3 +228,4 @@ create table notifications_sent (
 -- alter table trips add column notes text;
 -- alter table trip_activities add column start_time time;
 -- alter table trip_activities add column end_time time;
+-- alter table trip_activities add column participants text not null default 'everyone';

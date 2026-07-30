@@ -8,9 +8,11 @@ import {
   ACTIVITY_TYPES,
   ACTIVITY_PRIORITIES,
   ACTIVITY_STATUSES,
+  ACTIVITY_PARTICIPANTS,
   type ActivitySlot,
   type ActivityType,
   type ActivityStatus,
+  type ActivityParticipants,
 } from '@/lib/trip-constants';
 
 export type ActivityInput = {
@@ -23,6 +25,7 @@ export type ActivityInput = {
   hours?: string | null;
   start_time?: string | null; // "HH:MM"
   end_time?: string | null; // "HH:MM"
+  participants?: ActivityParticipants;
   is_adults_only?: boolean;
   reservation_info?: string | null;
   status?: ActivityStatus;
@@ -63,6 +66,9 @@ export async function addActivity(tripId: string, dayId: string, fields: Activit
   if (!fields.name?.trim()) return { error: 'Name is required.' };
   if (!ACTIVITY_SLOTS.includes(fields.slot)) return { error: 'Invalid slot.' };
   if (!ACTIVITY_TYPES.includes(fields.type)) return { error: 'Invalid type.' };
+  if (fields.participants && !ACTIVITY_PARTICIPANTS.includes(fields.participants)) {
+    return { error: 'Invalid participants.' };
+  }
   if (!isValidTimeRange(fields.start_time, fields.end_time)) {
     return { error: 'End time must be after start time.' };
   }
@@ -102,6 +108,7 @@ export async function addActivity(tripId: string, dayId: string, fields: Activit
     hours: fields.hours || null,
     start_time: fields.start_time || null,
     end_time: fields.end_time || null,
+    participants: fields.participants || 'everyone',
     is_adults_only: fields.is_adults_only || false,
     reservation_info: fields.reservation_info || null,
     priority: 'primary',
@@ -121,6 +128,9 @@ export async function updateActivity(
   if (fields.slot && !ACTIVITY_SLOTS.includes(fields.slot)) return { error: 'Invalid slot.' };
   if (fields.type && !ACTIVITY_TYPES.includes(fields.type)) return { error: 'Invalid type.' };
   if (fields.status && !ACTIVITY_STATUSES.includes(fields.status)) return { error: 'Invalid status.' };
+  if (fields.participants && !ACTIVITY_PARTICIPANTS.includes(fields.participants)) {
+    return { error: 'Invalid participants.' };
+  }
   if (
     fields.start_time !== undefined &&
     fields.end_time !== undefined &&
@@ -143,6 +153,7 @@ export async function updateActivity(
     'hours',
     'start_time',
     'end_time',
+    'participants',
     'is_adults_only',
     'reservation_info',
     'status',

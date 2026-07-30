@@ -14,3 +14,9 @@ export type ActivityPriority = (typeof ACTIVITY_PRIORITIES)[number];
 
 export const ACTIVITY_STATUSES = ['planned', 'confirmed', 'completed', 'cancelled'] as const;
 export type ActivityStatus = (typeof ACTIVITY_STATUSES)[number];
+
+// Who the activity is for — drives the grid's color coding and lets two
+// activities overlap in time without being flagged as a scheduling conflict
+// (e.g. an adults_only errand running alongside kids_with_nanny time).
+export const ACTIVITY_PARTICIPANTS = ['everyone', 'adults_only', 'kids_only', 'kids_with_nanny'] as const;
+export type ActivityParticipants = (typeof ACTIVITY_PARTICIPANTS)[number];

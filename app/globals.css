@@ -7,9 +7,12 @@
   --accent: #2563eb;
   --danger: #dc2626;
   --radius: 10px;
-  --type-activity: #16a34a;
-  --type-restaurant: #ea580c;
-  --type-date_night_restaurant: #db2777;
+  /* Activity-block badge colors — fixed across light/dark (not page chrome;
+     these sit on their own solid background with white text either way). */
+  --who-everyone: #2563eb;
+  --who-adults_only: #9333ea;
+  --who-kids_only: #0d9488;
+  --who-kids_with_nanny: #b45309;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,9 +24,6 @@
     --border: #2e2e2e;
     --accent: #5b9dff;
     --danger: #f87171;
-    --type-activity: #4ade80;
-    --type-restaurant: #fb923c;
-    --type-date_night_restaurant: #f472b6;
   }
 }
 
@@ -59,6 +59,13 @@ select,
 textarea {
   font-family: inherit;
   font-size: 16px; /* prevents iOS auto-zoom on focus */
+}
+
+input[type='time'] {
+  /* Without this, the native time picker's clock icon renders in its
+     default dark-on-transparent style and disappears against a dark
+     background — looks broken even though the picker still works. */
+  color-scheme: light dark;
 }
 
 .card {
@@ -175,7 +182,7 @@ textarea {
   color: white;
   font-size: 12px;
   line-height: 1.25;
-  border: none;
+  border: 2px solid transparent;
   text-align: left;
   cursor: pointer;
 }
@@ -185,16 +192,52 @@ textarea {
   display: block;
 }
 
-.activity-block--activity {
-  background: var(--type-activity);
+.activity-block--everyone {
+  background: var(--who-everyone);
 }
 
-.activity-block--restaurant {
-  background: var(--type-restaurant);
+.activity-block--adults_only {
+  background: var(--who-adults_only);
 }
 
-.activity-block--date_night_restaurant {
-  background: var(--type-date_night_restaurant);
+.activity-block--kids_only {
+  background: var(--who-kids_only);
+}
+
+.activity-block--kids_with_nanny {
+  background: var(--who-kids_with_nanny);
+}
+
+.activity-block--conflict {
+  border-color: var(--danger);
+}
+
+.conflict-flag {
+  font-weight: 700;
+}
+
+.who-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.who-legend-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+.who-tag {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: white;
 }
 
 .unscheduled-row {
