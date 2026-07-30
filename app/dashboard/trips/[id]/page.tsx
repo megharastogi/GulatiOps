@@ -2,22 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getHousehold } from '@/lib/household';
+import TripDayView from './TripDayView';
 
 export const dynamic = 'force-dynamic';
-
-function formatDay(dateStr: string) {
-  return new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-  });
-}
-
-const SLOT_LABEL: Record<string, string> = {
-  morning: 'Morning',
-  afternoon: 'Afternoon',
-  evening: 'Evening',
-};
 
 export default async function TripDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -71,40 +58,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
       </div>
 
       {days?.length ? (
-        days.map((day) => (
-          <section key={day.id}>
-            <h3 style={{ fontSize: 14, marginBottom: 6 }}>
-              {formatDay(day.date)}
-              {day.is_date_night ? ' · date night' : ''}
-            </h3>
-            {activitiesByDay[day.id]?.length ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {activitiesByDay[day.id].map((a) => (
-                  <div key={a.id} className="card">
-                    <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase' }}>
-                      {SLOT_LABEL[a.slot] ?? a.slot}
-                    </div>
-                    <div style={{ fontWeight: 600 }}>{a.name}</div>
-                    {a.address && (
-                      <div className="muted" style={{ fontSize: 13 }}>
-                        {a.address}
-                      </div>
-                    )}
-                    {a.reservation_info && (
-                      <div className="muted" style={{ fontSize: 13 }}>
-                        {a.reservation_info}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="muted" style={{ fontSize: 13 }}>
-                Nothing planned yet.
-              </p>
-            )}
-          </section>
-        ))
+        <TripDayView trip={trip} days={days} activitiesByDay={activitiesByDay} />
       ) : (
         <p className="muted">No days saved yet.</p>
       )}

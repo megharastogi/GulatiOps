@@ -10,6 +10,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+// Compares "HH:MM" strings; returns true if start/end are missing or end > start.
+// Cross-midnight ranges (e.g. 22:00-01:00) aren't representable by time-only
+// columns and will correctly fail this check — callers should fall back to `hours`.
+function isValidTimeRange(start?: string, end?: string) {
+  if (!start || !end) return true;
+  return end > start;
+}
+
 // -------- tool definitions --------
 const TOOLS = [
   {
@@ -210,6 +218,7 @@ const TOOLS = [
           description:
             'Free-form: nap_start, nap_end (HH:MM), date_night_days (array of YYYY-MM-DD), accommodation_address, etc.',
         },
+        notes: { type: 'string', description: 'Free-form trip notes: links, Airbnb reviews, articles, etc.' },
       },
       required: ['destination', 'start_date', 'end_date'],
     },
@@ -217,7 +226,7 @@ const TOOLS = [
   {
     name: 'save_trip_day_activities',
     description:
-      'Save or replace the full set of activities (primary + alternates) for one trip day. Replaces whatever was previously saved for that day.',
+      'Replaces the ENTIRE set of activities (primary + alternates) for one trip day — any existing start_time/end_time/status not re-specified here is lost. Use this only to regenerate a whole day from scratch. To change a single activity (e.g. move its time, update its status), use update_trip_activity instead.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -234,7 +243,9 @@ const TOOLS = [
               description: { type: 'string' },
               address: { type: 'string' },
               url: { type: 'string' },
-              hours: { type: 'string' },
+              hours: { type: 'string', description: 'Free-text fallback, e.g. "9am-5pm". Prefer start_time/end_time when known.' },
+              start_time: { type: 'string', description: 'HH:MM 24h. Powers the hourly grid view. Omit if unknown or crosses midnight (use hours instead).' },
+              end_time: { type: 'string', description: 'HH:MM 24h, must be after start_time.' },
               is_adults_only: { type: 'boolean' },
               reservation_info: { type: 'string' },
               priority: { type: 'string', enum: ['primary', 'alternate_1', 'alternate_2'], description: 'Default: primary' },
@@ -274,6 +285,8 @@ const TOOLS = [
         address: { type: 'string' },
         url: { type: 'string' },
         hours: { type: 'string' },
+        start_time: { type: 'string', description: 'HH:MM 24h. Powers the hourly grid view.' },
+        end_time: { type: 'string', description: 'HH:MM 24h, must be after start_time.' },
         reservation_info: { type: 'string' },
         priority: { type: 'string', enum: ['primary', 'alternate_1', 'alternate_2'] },
         status: { type: 'string', enum: ['planned', 'confirmed', 'completed', 'cancelled'] },
@@ -534,6 +547,7 @@ async function callTool(name: string, args: any) {
           adult_count: args.adult_count,
           kid_count: args.kid_count,
           constraints: args.constraints || {},
+          notes: args.notes,
         })
         .select()
         .single();
@@ -569,6 +583,12 @@ async function callTool(name: string, args: any) {
         .single();
       if (!day) return { error: 'No trip_day found for that trip_id/date' };
 
+      for (const a of args.activities || []) {
+        if (!isValidTimeRange(a.start_time, a.end_time)) {
+          return { error: `Invalid start_time/end_time for activity "${a.name}": end_time must be after start_time.` };
+        }
+      }
+
       await supabase.from('trip_activities').delete().eq('trip_day_id', day.id);
 
       const rows = (args.activities || []).map((a: any, i: number) => ({
@@ -582,6 +602,8 @@ async function callTool(name: string, args: any) {
         address: a.address,
         url: a.url,
         hours: a.hours,
+        start_time: a.start_time || null,
+        end_time: a.end_time || null,
         is_adults_only: a.is_adults_only || false,
         reservation_info: a.reservation_info,
         priority: a.priority || 'primary',
@@ -653,6 +675,10 @@ async function callTool(name: string, args: any) {
         return { swapped: true, activity_id: a.id, swapped_with: b.id };
       }
 
+      if (args.start_time !== undefined && args.end_time !== undefined && !isValidTimeRange(args.start_time, args.end_time)) {
+        return { error: 'Invalid start_time/end_time: end_time must be after start_time.' };
+      }
+
       const updates: any = {};
       for (const key of [
         'name',
@@ -660,6 +686,8 @@ async function callTool(name: string, args: any) {
         'address',
         'url',
         'hours',
+        'start_time',
+        'end_time',
         'reservation_info',
         'priority',
         'status',

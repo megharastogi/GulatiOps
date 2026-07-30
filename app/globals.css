@@ -7,6 +7,9 @@
   --accent: #2563eb;
   --danger: #dc2626;
   --radius: 10px;
+  --type-activity: #16a34a;
+  --type-restaurant: #ea580c;
+  --type-date_night_restaurant: #db2777;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -18,6 +21,9 @@
     --border: #2e2e2e;
     --accent: #5b9dff;
     --danger: #f87171;
+    --type-activity: #4ade80;
+    --type-restaurant: #fb923c;
+    --type-date_night_restaurant: #f472b6;
   }
 }
 
@@ -100,4 +106,105 @@ textarea {
   color: var(--text-muted);
   font-size: 14px;
   padding: 4px;
+}
+
+/* ---- Trip hourly grid ---- */
+
+.day-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.day-tab {
+  flex: 0 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.day-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.hour-grid-wrap {
+  display: flex;
+  gap: 8px;
+}
+
+.hour-labels {
+  flex: 0 0 auto;
+  width: 44px;
+  position: relative;
+}
+
+.hour-label {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.hour-grid {
+  flex: 1;
+  position: relative;
+  border-left: 1px solid var(--border);
+}
+
+.hour-grid-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--border);
+}
+
+.activity-block {
+  position: absolute;
+  border-radius: 6px;
+  padding: 4px 8px;
+  overflow: hidden;
+  color: white;
+  font-size: 12px;
+  line-height: 1.25;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.activity-block .activity-name {
+  font-weight: 600;
+  display: block;
+}
+
+.activity-block--activity {
+  background: var(--type-activity);
+}
+
+.activity-block--restaurant {
+  background: var(--type-restaurant);
+}
+
+.activity-block--date_night_restaurant {
+  background: var(--type-date_night_restaurant);
+}
+
+.unscheduled-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.unscheduled-row .reorder-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }

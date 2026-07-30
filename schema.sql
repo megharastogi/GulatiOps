@@ -160,6 +160,7 @@ create table trips (
   kid_count int,
   constraints jsonb default '{}'::jsonb,  -- { nap_start, nap_end, date_night_days: [...], accommodation_address }
   status text not null default 'planning',  -- 'planning' | 'active' | 'completed'
+  notes text,                            -- free-form: links, Airbnb reviews, general trip notes
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -190,7 +191,9 @@ create table trip_activities (
   description text,
   address text,
   url text,
-  hours text,
+  hours text,                            -- free-text fallback (e.g. "9am-5pm") when start_time/end_time aren't set
+  start_time time,                       -- for the hourly grid view; null = shows in "Unscheduled"
+  end_time time,                         -- must be > start_time; cross-midnight activities can't be represented, use hours instead
   is_adults_only boolean default false,
   reservation_info text,                 -- confirmation numbers, notes
   priority text not null default 'primary',  -- 'primary' | 'alternate_1' | 'alternate_2'
@@ -214,3 +217,13 @@ create table notifications_sent (
   sent_at timestamptz default now(),
   related_email_id uuid references inbound_emails(id) on delete set null
 );
+
+-- ============================================================
+-- MIGRATION: run this in the Supabase SQL editor if schema.sql
+-- was already applied before the trip notes/hourly-grid feature.
+-- Safe to skip if applying schema.sql fresh (columns above already
+-- include these).
+-- ============================================================
+-- alter table trips add column notes text;
+-- alter table trip_activities add column start_time time;
+-- alter table trip_activities add column end_time time;
