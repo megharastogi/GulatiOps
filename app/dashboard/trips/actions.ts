@@ -40,26 +40,30 @@ export async function updateTripNotes(tripId: string, notes: string) {
   const supabase = createAdminClient();
   const household = await getHousehold();
 
-  await supabase
+  const { error } = await supabase
     .from('trips')
     .update({ notes })
     .eq('id', tripId)
     .eq('household_id', household.id);
+  if (error) return { error: error.message };
 
   revalidatePath(`/dashboard/trips/${tripId}`);
+  return { ok: true };
 }
 
 export async function updateDayNotes(tripId: string, dayId: string, notes: string) {
   const supabase = createAdminClient();
   const household = await getHousehold();
 
-  await supabase
+  const { error } = await supabase
     .from('trip_days')
     .update({ notes })
     .eq('id', dayId)
     .eq('household_id', household.id);
+  if (error) return { error: error.message };
 
   revalidatePath(`/dashboard/trips/${tripId}`);
+  return { ok: true };
 }
 
 export async function addActivity(tripId: string, dayId: string, fields: ActivityInput) {
@@ -77,25 +81,26 @@ export async function addActivity(tripId: string, dayId: string, fields: Activit
   const household = await getHousehold();
 
   // Verify the day belongs to this trip/household before writing.
-  const { data: day } = await supabase
+  const { data: day, error: dayError } = await supabase
     .from('trip_days')
     .select('id')
     .eq('id', dayId)
     .eq('trip_id', tripId)
     .eq('household_id', household.id)
     .single();
-  if (!day) return { error: 'Trip day not found.' };
+  if (dayError || !day) return { error: 'Trip day not found.' };
 
-  const { data: maxRow } = await supabase
+  const { data: maxRow, error: maxError } = await supabase
     .from('trip_activities')
     .select('sort_order')
     .eq('trip_day_id', dayId)
     .order('sort_order', { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (maxError) return { error: maxError.message };
   const nextSortOrder = (maxRow?.sort_order ?? -1) + 1;
 
-  await supabase.from('trip_activities').insert({
+  const { error: insertError } = await supabase.from('trip_activities').insert({
     trip_id: tripId,
     trip_day_id: dayId,
     household_id: household.id,
@@ -115,6 +120,7 @@ export async function addActivity(tripId: string, dayId: string, fields: Activit
     status: fields.status || 'planned',
     sort_order: nextSortOrder,
   });
+  if (insertError) return { error: insertError.message };
 
   revalidatePath(`/dashboard/trips/${tripId}`);
   return { ok: true };
@@ -162,11 +168,14 @@ export async function updateActivity(
   }
   if (updates.name !== undefined && !String(updates.name).trim()) return { error: 'Name is required.' };
 
-  await supabase
+  const { error, data } = await supabase
     .from('trip_activities')
     .update(updates)
     .eq('id', activityId)
-    .eq('household_id', household.id);
+    .eq('household_id', household.id)
+    .select('id');
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: 'Activity not found.' };
 
   revalidatePath(`/dashboard/trips/${tripId}`);
   return { ok: true };
@@ -176,13 +185,15 @@ export async function deleteActivity(tripId: string, activityId: string) {
   const supabase = createAdminClient();
   const household = await getHousehold();
 
-  await supabase
+  const { error } = await supabase
     .from('trip_activities')
     .delete()
     .eq('id', activityId)
     .eq('household_id', household.id);
+  if (error) return { error: error.message };
 
   revalidatePath(`/dashboard/trips/${tripId}`);
+  return { ok: true };
 }
 
 export async function moveActivity(
@@ -200,24 +211,27 @@ export async function moveActivity(
 
   // The target day id could be anything the client sends — re-verify it
   // actually belongs to this trip/household before repointing the activity.
-  const { data: targetDay } = await supabase
+  const { data: targetDay, error: dayError } = await supabase
     .from('trip_days')
     .select('id')
     .eq('id', targetDayId)
     .eq('trip_id', tripId)
     .eq('household_id', household.id)
     .single();
-  if (!targetDay) return { error: 'Target day not found on this trip.' };
+  if (dayError || !targetDay) return { error: 'Target day not found on this trip.' };
 
   const updates: Record<string, unknown> = { trip_day_id: targetDayId };
   if (fields?.start_time !== undefined) updates.start_time = fields.start_time || null;
   if (fields?.end_time !== undefined) updates.end_time = fields.end_time || null;
 
-  await supabase
+  const { error, data } = await supabase
     .from('trip_activities')
     .update(updates)
     .eq('id', activityId)
-    .eq('household_id', household.id);
+    .eq('household_id', household.id)
+    .select('id');
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: 'Activity not found.' };
 
   revalidatePath(`/dashboard/trips/${tripId}`);
   return { ok: true };
@@ -235,7 +249,7 @@ export async function reorderUnscheduled(
   const supabase = createAdminClient();
   const household = await getHousehold();
 
-  const { data: siblings } = await supabase
+  const { data: siblings, error: fetchError } = await supabase
     .from('trip_activities')
     .select('id, sort_order')
     .eq('trip_day_id', dayId)
@@ -243,17 +257,22 @@ export async function reorderUnscheduled(
     .eq('priority', 'primary')
     .is('start_time', null)
     .order('sort_order', { ascending: true });
-  if (!siblings) return;
+  if (fetchError) return { error: fetchError.message };
+  if (!siblings) return { ok: true };
 
   const index = siblings.findIndex((s) => s.id === activityId);
-  if (index === -1) return;
+  if (index === -1) return { error: 'Activity not found.' };
   const swapIndex = direction === 'up' ? index - 1 : index + 1;
-  if (swapIndex < 0 || swapIndex >= siblings.length) return;
+  if (swapIndex < 0 || swapIndex >= siblings.length) return { ok: true };
 
   const a = siblings[index];
   const b = siblings[swapIndex];
-  await supabase.from('trip_activities').update({ sort_order: b.sort_order }).eq('id', a.id);
-  await supabase.from('trip_activities').update({ sort_order: a.sort_order }).eq('id', b.id);
+  const [{ error: errA }, { error: errB }] = await Promise.all([
+    supabase.from('trip_activities').update({ sort_order: b.sort_order }).eq('id', a.id),
+    supabase.from('trip_activities').update({ sort_order: a.sort_order }).eq('id', b.id),
+  ]);
+  if (errA || errB) return { error: (errA || errB)!.message };
 
   revalidatePath(`/dashboard/trips/${tripId}`);
+  return { ok: true };
 }

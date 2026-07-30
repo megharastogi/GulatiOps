@@ -207,6 +207,7 @@ export default function TripDayView({
   const [dayNotes, setDayNotes] = useState<Record<string, string>>(() =>
     Object.fromEntries(days.map((d) => [d.id, d.notes ?? '']))
   );
+  const [actionError, setActionError] = useState<string | null>(null);
   const editPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -246,14 +247,16 @@ export default function TripDayView({
   const editingActivity = dayActivities.find((a) => a.id === editingId) || null;
 
   function saveTripNotes() {
-    startTransition(() => {
-      updateTripNotes(trip.id, tripNotes);
+    startTransition(async () => {
+      const res = await updateTripNotes(trip.id, tripNotes);
+      setActionError(res?.error ?? null);
     });
   }
 
   function saveDayNotes(dayId: string) {
-    startTransition(() => {
-      updateDayNotes(trip.id, dayId, dayNotes[dayId] ?? '');
+    startTransition(async () => {
+      const res = await updateDayNotes(trip.id, dayId, dayNotes[dayId] ?? '');
+      setActionError(res?.error ?? null);
     });
   }
 
@@ -273,6 +276,7 @@ export default function TripDayView({
     };
     startTransition(async () => {
       const res = await addActivity(trip.id, activeDayId, fields);
+      setActionError(res?.error ?? null);
       if (!res?.error) setAdding(false);
     });
   }
@@ -296,11 +300,19 @@ export default function TripDayView({
     };
     startTransition(async () => {
       const res = await updateActivity(trip.id, editingActivity.id, fields);
-      if (res?.error) return;
+      if (res?.error) {
+        setActionError(res.error);
+        return;
+      }
       if (targetDayId !== editingActivity.trip_day_id) {
-        await moveActivity(trip.id, editingActivity.id, targetDayId);
+        const moveRes = await moveActivity(trip.id, editingActivity.id, targetDayId);
+        if (moveRes?.error) {
+          setActionError(moveRes.error);
+          return;
+        }
         setActiveDayId(targetDayId);
       }
+      setActionError(null);
       setEditingId(null);
     });
   }
@@ -308,10 +320,15 @@ export default function TripDayView({
   function handleDelete() {
     if (!editingActivity) return;
     if (!window.confirm(`Delete "${editingActivity.name}"?`)) return;
-    startTransition(() => {
-      deleteActivity(trip.id, editingActivity.id);
+    startTransition(async () => {
+      const res = await deleteActivity(trip.id, editingActivity.id);
+      if (res?.error) {
+        setActionError(res.error);
+        return;
+      }
+      setActionError(null);
+      setEditingId(null);
     });
-    setEditingId(null);
   }
 
   return (
@@ -348,6 +365,15 @@ export default function TripDayView({
           </div>
         )}
       </div>
+
+      {actionError && (
+        <div className="card" style={{ borderColor: 'var(--danger)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+          <span className="error">{actionError}</span>
+          <button type="button" className="btn-ghost" onClick={() => setActionError(null)}>
+            ✕
+          </button>
+        </div>
+      )}
 
       <div className="day-tabs">
         {days.map((day) => {
@@ -447,7 +473,12 @@ export default function TripDayView({
                         type="button"
                         className="btn-ghost"
                         disabled={i === 0 || isPending}
-                        onClick={() => startTransition(() => reorderUnscheduled(trip.id, activeDayId, a.id, 'up'))}
+                        onClick={() =>
+                          startTransition(async () => {
+                            const res = await reorderUnscheduled(trip.id, activeDayId, a.id, 'up');
+                            setActionError(res?.error ?? null);
+                          })
+                        }
                       >
                         ↑
                       </button>
@@ -455,7 +486,12 @@ export default function TripDayView({
                         type="button"
                         className="btn-ghost"
                         disabled={i === unscheduled.length - 1 || isPending}
-                        onClick={() => startTransition(() => reorderUnscheduled(trip.id, activeDayId, a.id, 'down'))}
+                        onClick={() =>
+                          startTransition(async () => {
+                            const res = await reorderUnscheduled(trip.id, activeDayId, a.id, 'down');
+                            setActionError(res?.error ?? null);
+                          })
+                        }
                       >
                         ↓
                       </button>
