@@ -4,6 +4,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { checkBusy, createEvent, listEvents, deleteEvent } from '@/lib/google-calendar';
 import { getHousehold } from '@/lib/household';
+import { extractTimeFromText } from '@/lib/extract-time';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -615,6 +616,11 @@ async function callTool(name: string, args: any) {
       const toInsert: any[] = [];
 
       for (const a of args.activities || []) {
+        // If no start_time was given but one is embedded in the reservation
+        // info or name (e.g. "CONFIRMED: 11:00 AM, 2 guests"), use that —
+        // otherwise the time only exists as text and never reaches the grid.
+        const inferredStart =
+          a.start_time || extractTimeFromText(a.reservation_info) || extractTimeFromText(a.name);
         const fields = {
           slot: a.slot,
           type: a.type,
@@ -623,7 +629,7 @@ async function callTool(name: string, args: any) {
           address: a.address,
           url: a.url,
           hours: a.hours,
-          start_time: a.start_time || null,
+          start_time: inferredStart || null,
           end_time: a.end_time || null,
           participants: a.participants || 'everyone',
           is_adults_only: a.is_adults_only || false,
@@ -746,6 +752,25 @@ async function callTool(name: string, args: any) {
       ]) {
         if (args[key] !== undefined) updates[key] = args[key];
       }
+
+      // If start_time isn't being set explicitly, and the activity doesn't
+      // already have one, try to pull it out of whatever reservation_info/
+      // name text is being written (e.g. "CONFIRMED: 11:00 AM, 2 guests").
+      if (updates.start_time === undefined && (updates.reservation_info !== undefined || updates.name !== undefined)) {
+        const { data: existing } = await supabase
+          .from('trip_activities')
+          .select('start_time, reservation_info, name')
+          .eq('id', args.activity_id)
+          .eq('household_id', household.id)
+          .single();
+        if (existing && !existing.start_time) {
+          const inferred =
+            extractTimeFromText(updates.reservation_info ?? existing.reservation_info) ||
+            extractTimeFromText(updates.name ?? existing.name);
+          if (inferred) updates.start_time = inferred;
+        }
+      }
+
       const { data } = await supabase
         .from('trip_activities')
         .update(updates)

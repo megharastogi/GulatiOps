@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getHousehold } from '@/lib/household';
+import { extractTimeFromText } from '@/lib/extract-time';
 import {
   ACTIVITY_SLOTS,
   ACTIVITY_TYPES,
@@ -100,6 +101,9 @@ export async function addActivity(tripId: string, dayId: string, fields: Activit
   if (maxError) return { error: maxError.message };
   const nextSortOrder = (maxRow?.sort_order ?? -1) + 1;
 
+  const inferredStart =
+    fields.start_time || extractTimeFromText(fields.reservation_info) || extractTimeFromText(fields.name);
+
   const { error: insertError } = await supabase.from('trip_activities').insert({
     trip_id: tripId,
     trip_day_id: dayId,
@@ -111,7 +115,7 @@ export async function addActivity(tripId: string, dayId: string, fields: Activit
     address: fields.address || null,
     url: fields.url || null,
     hours: fields.hours || null,
-    start_time: fields.start_time || null,
+    start_time: inferredStart || null,
     end_time: fields.end_time || null,
     participants: fields.participants || 'everyone',
     is_adults_only: fields.is_adults_only || false,
@@ -165,6 +169,16 @@ export async function updateActivity(
     'status',
   ] as const) {
     if (fields[key] !== undefined) updates[key] = fields[key] || null;
+  }
+
+  // If the form's time picker was left blank, but the reservation info or
+  // name has a time embedded in it (e.g. pasted confirmation text), use
+  // that instead of silently clearing an existing time.
+  if (!updates.start_time && (updates.reservation_info !== undefined || updates.name !== undefined)) {
+    const inferred =
+      extractTimeFromText((updates.reservation_info as string) ?? null) ||
+      extractTimeFromText((updates.name as string) ?? null);
+    if (inferred) updates.start_time = inferred;
   }
   if (updates.name !== undefined && !String(updates.name).trim()) return { error: 'Name is required.' };
 
