@@ -223,13 +223,23 @@ export default function TripDayView({
 
   const scheduled = useMemo(() => {
     const withMinutes = dayActivities
-      .map((a) => ({ ...a, startMin: parseMinutes(a.start_time), endMin: parseMinutes(a.end_time) }))
+      .map((a) => {
+        const startMin = parseMinutes(a.start_time);
+        let endMin = parseMinutes(a.end_time);
+        // A time was given but no explicit duration (e.g. "dinner at 7pm")
+        // — assume a reasonable length rather than hiding it as unscheduled.
+        if (startMin != null && endMin == null) {
+          const defaultDuration = a.type === 'activity' ? 60 : 90;
+          endMin = Math.min(24 * 60, startMin + defaultDuration);
+        }
+        return { ...a, startMin, endMin };
+      })
       .filter((a): a is TripActivity & { startMin: number; endMin: number } => a.startMin != null && a.endMin != null);
     return layoutOverlaps(withMinutes);
   }, [dayActivities]);
 
   const unscheduled = dayActivities
-    .filter((a) => !a.start_time || !a.end_time)
+    .filter((a) => !a.start_time)
     .sort((a, b) => a.sort_order - b.sort_order);
 
   const { gridStart, gridEnd } = useMemo(() => {
