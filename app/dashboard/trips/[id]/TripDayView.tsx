@@ -217,7 +217,9 @@ export default function TripDayView({
   }, [editingId]);
 
   const activeDay = days.find((d) => d.id === activeDayId);
-  const dayActivities = activitiesByDay[activeDayId] || [];
+  const allDayActivities = activitiesByDay[activeDayId] || [];
+  const dayActivities = allDayActivities.filter((a) => a.status !== 'cancelled');
+  const cancelledActivities = allDayActivities.filter((a) => a.status === 'cancelled');
 
   const scheduled = useMemo(() => {
     const withMinutes = dayActivities
@@ -244,7 +246,7 @@ export default function TripDayView({
   const hours: number[] = [];
   for (let h = Math.ceil(gridStart / 60); h <= Math.floor(gridEnd / 60); h++) hours.push(h);
 
-  const editingActivity = dayActivities.find((a) => a.id === editingId) || null;
+  const editingActivity = allDayActivities.find((a) => a.id === editingId) || null;
 
   function saveTripNotes() {
     startTransition(async () => {
@@ -515,6 +517,27 @@ export default function TripDayView({
                 ))}
               </div>
             </div>
+          )}
+
+          {cancelledActivities.length > 0 && (
+            <details>
+              <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--text-muted)' }}>
+                Cancelled ({cancelledActivities.length})
+              </summary>
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {cancelledActivities.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className="card btn-ghost"
+                    style={{ textAlign: 'left', color: 'var(--text)', textDecoration: 'line-through' }}
+                    onClick={() => setEditingId(a.id)}
+                  >
+                    {a.name}
+                  </button>
+                ))}
+              </div>
+            </details>
           )}
 
           {!adding ? (

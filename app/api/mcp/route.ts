@@ -226,7 +226,7 @@ const TOOLS = [
   {
     name: 'save_trip_day_activities',
     description:
-      'Replaces the ENTIRE set of activities (primary + alternates) for one trip day — any existing start_time/end_time/status not re-specified here is lost. Use this only to regenerate a whole day from scratch. To change a single activity (e.g. move its time, update its status), use update_trip_activity instead.',
+      'Adds or updates activities for one trip day. Activities are matched by id (from get_trip_itinerary): pass an existing id to update that activity in place, or omit id to add a new one. Nothing on the day is deleted or lost — activities you don\'t mention are left untouched. To change just one existing activity, prefer update_trip_activity instead. To remove an activity, use update_trip_activity with status: "cancelled" (cancelled activities are hidden from the itinerary view) rather than this tool.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -237,6 +237,7 @@ const TOOLS = [
           items: {
             type: 'object',
             properties: {
+              id: { type: 'string', description: 'Existing activity id to update. Omit to create a new activity.' },
               slot: { type: 'string', enum: ['morning', 'afternoon', 'evening'] },
               type: { type: 'string', enum: ['activity', 'restaurant', 'date_night_restaurant'] },
               name: { type: 'string' },
@@ -599,30 +600,67 @@ async function callTool(name: string, args: any) {
         }
       }
 
-      await supabase.from('trip_activities').delete().eq('trip_day_id', day.id);
+      // Upsert by id — never delete activities the caller didn't mention.
+      // A blanket delete-then-reinsert here previously wiped an entire day
+      // (including hand-confirmed activities) whenever this tool was used
+      // to change just one thing.
+      const { data: existingRows } = await supabase
+        .from('trip_activities')
+        .select('id, sort_order')
+        .eq('trip_day_id', day.id);
+      const existingIds = new Set((existingRows || []).map((r) => r.id));
+      let nextSortOrder = Math.max(-1, ...(existingRows || []).map((r) => r.sort_order ?? 0)) + 1;
 
-      const rows = (args.activities || []).map((a: any, i: number) => ({
-        trip_id: args.trip_id,
-        trip_day_id: day.id,
-        household_id: household.id,
-        slot: a.slot,
-        type: a.type,
-        name: a.name,
-        description: a.description,
-        address: a.address,
-        url: a.url,
-        hours: a.hours,
-        start_time: a.start_time || null,
-        end_time: a.end_time || null,
-        participants: a.participants || 'everyone',
-        is_adults_only: a.is_adults_only || false,
-        reservation_info: a.reservation_info,
-        priority: a.priority || 'primary',
-        status: a.status || 'planned',
-        sort_order: a.sort_order ?? i,
-      }));
-      const { data } = await supabase.from('trip_activities').insert(rows).select();
-      return { saved: true, activities: data || [] };
+      const results: any[] = [];
+      const toInsert: any[] = [];
+
+      for (const a of args.activities || []) {
+        const fields = {
+          slot: a.slot,
+          type: a.type,
+          name: a.name,
+          description: a.description,
+          address: a.address,
+          url: a.url,
+          hours: a.hours,
+          start_time: a.start_time || null,
+          end_time: a.end_time || null,
+          participants: a.participants || 'everyone',
+          is_adults_only: a.is_adults_only || false,
+          reservation_info: a.reservation_info,
+          priority: a.priority || 'primary',
+          status: a.status || 'planned',
+        };
+
+        if (a.id) {
+          if (!existingIds.has(a.id)) {
+            return { error: `Activity id "${a.id}" not found on this day — omit id to add it as a new activity.` };
+          }
+          const { data } = await supabase
+            .from('trip_activities')
+            .update(fields)
+            .eq('id', a.id)
+            .eq('household_id', household.id)
+            .select()
+            .single();
+          if (data) results.push(data);
+        } else {
+          toInsert.push({
+            trip_id: args.trip_id,
+            trip_day_id: day.id,
+            household_id: household.id,
+            ...fields,
+            sort_order: nextSortOrder++,
+          });
+        }
+      }
+
+      if (toInsert.length) {
+        const { data } = await supabase.from('trip_activities').insert(toInsert).select();
+        results.push(...(data || []));
+      }
+
+      return { saved: true, activities: results };
     }
 
     case 'get_trip_itinerary': {
