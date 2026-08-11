@@ -2,6 +2,7 @@
 // Connect this URL to claude.ai as a custom connector.
 
 import { createClient } from '@supabase/supabase-js';
+import { timingSafeEqual } from 'crypto';
 import { checkBusy, createEvent, listEvents, deleteEvent } from '@/lib/google-calendar';
 import { getHousehold } from '@/lib/household';
 import { extractTimeFromText } from '@/lib/extract-time';
@@ -10,6 +11,25 @@ const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+// Fails CLOSED: a missing/misconfigured MCP_SHARED_SECRET means no access,
+// not open access. A previous version treated an unset secret as "auth not
+// required," which would silently expose every tool (including destructive
+// ones) if the env var was ever missing on a deploy.
+function isAuthorizedMcpRequest(request: Request): boolean {
+  const secret = process.env.MCP_SHARED_SECRET;
+  if (!secret) return false;
+
+  const { searchParams } = new URL(request.url);
+  // Query-string auth is kept only because the claude.ai connector UI
+  // doesn't support custom headers — note it can still leak via logs/history.
+  const provided = request.headers.get('x-mcp-secret') || searchParams.get('secret') || '';
+
+  const providedBuf = Buffer.from(provided);
+  const secretBuf = Buffer.from(secret);
+  if (providedBuf.length !== secretBuf.length) return false;
+  return timingSafeEqual(providedBuf, secretBuf);
+}
 
 // Compares "HH:MM" strings; returns true if start/end are missing or end > start.
 // Cross-midnight ranges (e.g. 22:00-01:00) aren't representable by time-only
@@ -805,13 +825,8 @@ async function callTool(name: string, args: any) {
 
 // -------- MCP JSON-RPC handler --------
 export async function POST(request: Request) {
-  // Accept secret via header or query param (claude.ai connector UI doesn't support headers)
-  if (process.env.MCP_SHARED_SECRET) {
-    const { searchParams } = new URL(request.url);
-    const provided = request.headers.get('x-mcp-secret') || searchParams.get('secret');
-    if (provided !== process.env.MCP_SHARED_SECRET) {
-      return Response.json({ error: 'unauthorized' }, { status: 401 });
-    }
+  if (!isAuthorizedMcpRequest(request)) {
+    return Response.json({ error: 'unauthorized' }, { status: 401 });
   }
 
   const { id, method, params } = await request.json();
