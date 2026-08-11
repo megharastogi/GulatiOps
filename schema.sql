@@ -220,6 +220,32 @@ create table notifications_sent (
 );
 
 -- ============================================================
+-- ROW LEVEL SECURITY
+-- ============================================================
+-- Every table gets RLS enabled and deliberately gets NO policies. Under
+-- Postgres's RLS default-deny, that means the anon/authenticated roles
+-- (reachable via the anon key shipped to the browser) get zero access.
+-- This app only ever reads/writes these tables server-side using the
+-- Supabase service-role key, which bypasses RLS regardless of policies —
+-- so this doesn't change how the app behaves, it just closes off direct
+-- access via the public Supabase REST API to anyone with the anon key.
+-- (This was previously enabled directly in the Supabase dashboard and
+-- never captured here — re-running this block is safe/idempotent.)
+
+alter table households enable row level security;
+alter table household_members enable row level security;
+alter table inbound_emails enable row level security;
+alter table school_calendar enable row level security;
+alter table action_items enable row level security;
+alter table google_oauth_tokens enable row level security;
+alter table grocery_items enable row level security;
+alter table grocery_pending enable row level security;
+alter table notifications_sent enable row level security;
+alter table trips enable row level security;
+alter table trip_days enable row level security;
+alter table trip_activities enable row level security;
+
+-- ============================================================
 -- MIGRATION: run this in the Supabase SQL editor if schema.sql
 -- was already applied before the trip notes/hourly-grid feature.
 -- Safe to skip if applying schema.sql fresh (columns above already
