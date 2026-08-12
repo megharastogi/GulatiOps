@@ -4,6 +4,7 @@
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { Resend } from 'resend';
+import { timingSafeEqual } from 'crypto';
 import { getHousehold } from '@/lib/household';
 
 const supabase = createClient(
@@ -13,9 +14,36 @@ const supabase = createClient(
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
-// Verify the request actually came from your Cloudflare Worker
+// Verify the request actually came from your Cloudflare Worker. Fails
+// closed (missing env var -> false) and uses a constant-time comparison.
 function verifySharedSecret(request: Request): boolean {
-  return request.headers.get('x-cof-secret') === process.env.INBOUND_SHARED_SECRET;
+  const secret = process.env.INBOUND_SHARED_SECRET;
+  if (!secret) return false;
+
+  const provided = request.headers.get('x-cof-secret') || '';
+  const providedBuf = Buffer.from(provided);
+  const secretBuf = Buffer.from(secret);
+  if (providedBuf.length !== secretBuf.length) return false;
+  return timingSafeEqual(providedBuf, secretBuf);
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!)
+  );
+}
+
+// Only render a details_url as a clickable link if it's a plain https URL —
+// blocks javascript:/data: URIs the model might otherwise copy verbatim
+// from a malicious email into an <a href>.
+function safeHttpsUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function POST(request: Request) {
@@ -65,6 +93,73 @@ export async function POST(request: Request) {
   return Response.json({ ok: true, email_id: emailRow.id });
 }
 
+// Lightweight guardrails on the model's JSON output before it reaches the
+// database — enum fields get clamped to a known-good value instead of
+// trusting whatever the model (or a crafted email trying to steer it)
+// returned, dates/times are validated by format, free text is length-capped,
+// and array sizes are capped so one email can't flood the tables.
+const CLASSIFICATIONS = new Set(['action_required', 'informational', 'noise']);
+const EVENT_TYPES = new Set([
+  'day_off', 'early_pickup', 'late_start', 'event', 'fundraiser', 'spirit_day', 'conference', 'social',
+]);
+const PRIORITIES = new Set(['urgent', 'normal', 'low']);
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^\d{2}:\d{2}$/;
+const MAX_ITEMS = 20;
+
+function truncateOrNull(value: unknown, max: number): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  return value.slice(0, max);
+}
+
+function dateOrNull(value: unknown): string | null {
+  return typeof value === 'string' && DATE_RE.test(value) ? value : null;
+}
+
+function timeOrNull(value: unknown): string | null {
+  return typeof value === 'string' && TIME_RE.test(value) ? value : null;
+}
+
+function normalizeParsedOutput(raw: any) {
+  const school_events = Array.isArray(raw?.school_events)
+    ? raw.school_events
+        .slice(0, MAX_ITEMS)
+        .map((e: any) => ({
+          event_type: EVENT_TYPES.has(e?.event_type) ? e.event_type : 'event',
+          title: truncateOrNull(e?.title, 200) || 'Untitled event',
+          description: truncateOrNull(e?.description, 1000),
+          start_date: dateOrNull(e?.start_date),
+          end_date: dateOrNull(e?.end_date),
+          start_time: timeOrNull(e?.start_time),
+          end_time: timeOrNull(e?.end_time),
+          location: truncateOrNull(e?.location, 200),
+        }))
+        // An event with no valid date isn't useful on a calendar and
+        // shouldn't be stored — better to drop it than show "undefined".
+        .filter((e: any) => e.start_date)
+    : [];
+
+  const action_items = Array.isArray(raw?.action_items)
+    ? raw.action_items.slice(0, MAX_ITEMS).map((a: any) => ({
+        title: truncateOrNull(a?.title, 200) || 'Untitled task',
+        description: truncateOrNull(a?.description, 1000),
+        details_url: safeHttpsUrl(a?.details_url),
+        due_date: dateOrNull(a?.due_date),
+        priority: PRIORITIES.has(a?.priority) ? a.priority : 'normal',
+        category: truncateOrNull(a?.category, 50),
+      }))
+    : [];
+
+  return {
+    classification: CLASSIFICATIONS.has(raw?.classification) ? raw.classification : 'informational',
+    source_type: truncateOrNull(raw?.source_type, 50),
+    source_name: truncateOrNull(raw?.source_name, 200),
+    summary: truncateOrNull(raw?.summary, 500),
+    school_events,
+    action_items,
+  };
+}
+
 function extractLinks(html: string): string[] {
   const matches = [...html.matchAll(/href=["'](https?:\/\/[^"'\s>]+)["']/gi)];
   return [...new Set(matches.map((m) => m[1]))]
@@ -74,8 +169,16 @@ function extractLinks(html: string): string[] {
 
 async function fetchNewsletterContent(url: string): Promise<string> {
   try {
+    // Strip query params before handing the URL to a third party (Jina) —
+    // that's typically where signed/personalized tokens live (recipient
+    // IDs, tracking params). The newsletter body itself rarely depends on
+    // them, so this trades a little enrichment quality for not leaking
+    // per-recipient identifiers off-platform.
+    const stripped = new URL(url);
+    stripped.search = '';
+
     // Use Jina Reader to handle JS-rendered pages (Smore, Peachjar, etc.)
-    const readerUrl = `https://r.jina.ai/${url}`;
+    const readerUrl = `https://r.jina.ai/${stripped.toString()}`;
     const res = await fetch(readerUrl, {
       headers: { Accept: 'text/plain' },
       signal: AbortSignal.timeout(15000),
@@ -173,7 +276,7 @@ Rules:
 
   const textBlock = parseResp.content.find((b) => b.type === 'text') as any;
   const rawText = textBlock.text.replace(/```json|```/g, '').trim();
-  const parsed = JSON.parse(rawText);
+  const parsed = normalizeParsedOutput(JSON.parse(rawText));
 
   // 3. Update inbound_emails with parse output
   await supabase
@@ -233,27 +336,33 @@ async function sendPerEmailSummary(household: any, email: any, parsed: any) {
   const urgencyBadge =
     parsed.classification === 'action_required' ? '⚡ Action needed' : 'ℹ️ Heads up';
 
+  // Everything below is derived from a forwarded email (or the model's read
+  // of one) and is untrusted — escape all free text before it goes into
+  // HTML you'll actually open. start_date/start_time/due_date are already
+  // format-validated in normalizeParsedOutput so are safe to embed as-is;
+  // details_url is already restricted to https by safeHttpsUrl but still
+  // gets escaped defensively as an attribute value.
   const eventsHtml = (parsed.school_events || [])
     .map(
       (e: any) =>
-        `<li><strong>${e.title}</strong> — ${e.start_date}${e.start_time ? ` at ${e.start_time}` : ''}${e.location ? `, ${e.location}` : ''}</li>`
+        `<li><strong>${escapeHtml(e.title)}</strong> — ${e.start_date}${e.start_time ? ` at ${e.start_time}` : ''}${e.location ? `, ${escapeHtml(e.location)}` : ''}</li>`
     )
     .join('');
 
   const actionsHtml = (parsed.action_items || [])
     .map(
       (a: any) =>
-        `<li><strong>${a.title}</strong>${a.due_date ? ` (due ${a.due_date})` : ''}${a.details_url ? ` — <a href="${a.details_url}">link</a>` : ''}</li>`
+        `<li><strong>${escapeHtml(a.title)}</strong>${a.due_date ? ` (due ${a.due_date})` : ''}${a.details_url ? ` — <a href="${escapeHtml(a.details_url)}">link</a>` : ''}</li>`
     )
     .join('');
 
   const html = `
-    <p>${urgencyBadge} — from ${parsed.source_name || email.from_name || email.from_address}</p>
-    <p>${parsed.summary}</p>
+    <p>${urgencyBadge} — from ${escapeHtml(parsed.source_name || email.from_name || email.from_address)}</p>
+    <p>${escapeHtml(parsed.summary)}</p>
     ${eventsHtml ? `<p><strong>Dates:</strong></p><ul>${eventsHtml}</ul>` : ''}
     ${actionsHtml ? `<p><strong>To do:</strong></p><ul>${actionsHtml}</ul>` : ''}
     <hr/>
-    <p style="color:#888;font-size:12px">Original subject: ${email.subject}</p>
+    <p style="color:#888;font-size:12px">Original subject: ${escapeHtml(email.subject)}</p>
   `;
 
   await resend.emails.send({
