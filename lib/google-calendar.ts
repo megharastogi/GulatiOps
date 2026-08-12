@@ -2,6 +2,7 @@
 // Helper for calling Google Calendar API with automatic token refresh.
 
 import { createClient } from '@supabase/supabase-js';
+import { encryptToken, decryptToken } from './token-crypto';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -19,7 +20,7 @@ async function getValidAccessToken(householdId: string): Promise<string> {
 
   const expiresAt = new Date(row.expires_at).getTime();
   // Refresh 60s before expiry
-  if (Date.now() < expiresAt - 60_000) return row.access_token;
+  if (Date.now() < expiresAt - 60_000) return decryptToken(row.access_token);
 
   const resp = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -27,7 +28,7 @@ async function getValidAccessToken(householdId: string): Promise<string> {
     body: new URLSearchParams({
       client_id: process.env.GOOGLE_CLIENT_ID!,
       client_secret: process.env.GOOGLE_CLIENT_SECRET!,
-      refresh_token: row.refresh_token,
+      refresh_token: decryptToken(row.refresh_token),
       grant_type: 'refresh_token',
     }),
   });
@@ -43,7 +44,7 @@ async function getValidAccessToken(householdId: string): Promise<string> {
   await supabase
     .from('google_oauth_tokens')
     .update({
-      access_token: tokens.access_token,
+      access_token: encryptToken(tokens.access_token),
       expires_at: newExpiresAt,
       updated_at: new Date().toISOString(),
     })

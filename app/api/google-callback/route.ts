@@ -10,6 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { createClient as createAuthClient } from '@/lib/supabase/server';
 import { getHousehold } from '@/lib/household';
+import { encryptToken, decryptToken } from '@/lib/token-crypto';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -74,7 +75,7 @@ export async function GET(request: Request) {
       .select('refresh_token')
       .eq('household_id', household.id)
       .maybeSingle();
-    refreshToken = existing?.refresh_token;
+    refreshToken = existing?.refresh_token ? decryptToken(existing.refresh_token) : null;
   }
   if (!refreshToken) {
     return new Response('Google did not return a refresh token and none exists to fall back on. Try again.', { status: 500 });
@@ -84,8 +85,8 @@ export async function GET(request: Request) {
 
   const { error } = await supabase.from('google_oauth_tokens').upsert({
     household_id: household.id,
-    access_token: tokens.access_token,
-    refresh_token: refreshToken,
+    access_token: encryptToken(tokens.access_token),
+    refresh_token: encryptToken(refreshToken),
     expires_at: expiresAt,
     scope: tokens.scope,
     updated_at: new Date().toISOString(),
