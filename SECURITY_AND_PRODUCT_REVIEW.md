@@ -14,7 +14,7 @@ The production build completed successfully using Next.js 15.5.20. No applicatio
 - [x] Secure Google OAuth account binding. — fixed 2026-07-31, commit `15cd8e4`.
 - [x] Make MCP authentication fail closed. — fixed 2026-07-31, commit `15cd8e4`.
 - [ ] Upgrade vulnerable dependencies.
-- [ ] Enforce owner/household authorization in server code.
+- [x] Enforce owner/household authorization in server code. — fixed 2026-07-31, commit `c5d5631` (middleware-level; per-Server-Action defense in depth still open).
 - [ ] Add validation, rate limits, idempotency, and transactions.
 - [ ] Escape generated email HTML and restrict external fetching.
 - [ ] Add automated security and integration tests.
@@ -103,7 +103,7 @@ It also accepts the secret in the query string, where it can leak through browse
 
 ### 4. Google OAuth tokens are stored in plaintext
 
-**Status:** [ ] Not started
+**Status:** [x] Fixed (2026-07-31, commit `c5d5631`) — tokens are now AES-256-GCM encrypted (`lib/token-crypto.ts`) before being written, with the key held only in `TOKEN_ENCRYPTION_KEY` (set in Vercel + local `.env`, never in Supabase). Existing plaintext tokens still read correctly (legacy passthrough, no key needed for that path) and get upgraded to encrypted automatically on their next refresh or reconnect. Verified: encrypt/decrypt round-trips correctly and a tampered ciphertext is rejected via GCM's auth tag.
 
 **Location:** `schema.sql`, table `google_oauth_tokens`
 
@@ -118,7 +118,7 @@ Access and refresh tokens are stored as ordinary text. A database leak, overly b
 
 ### 5. Any authenticated Supabase user can reach the household dashboard
 
-**Status:** [ ] Not started
+**Status:** [x] Fixed (2026-07-31, commit `c5d5631`) — `lib/supabase/middleware.ts` now verifies the session's email against `PRIMARY_DIGEST_EMAIL`, not just that a session exists, and signs out + redirects anyone else. This covers every dashboard page and Server Action gated by the same matcher (Server Actions invoked from an authorized page are POST requests to that page's own route, so they pass through the same middleware check). Not yet done: repeating authorization inside individual Server Actions as defense in depth, and building out real roles/membership if multiple users are ever supported (still relevant if this app grows beyond a single owner — see #26).
 
 **Locations:**
 
