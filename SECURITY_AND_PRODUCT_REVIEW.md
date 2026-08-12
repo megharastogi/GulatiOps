@@ -15,8 +15,8 @@ The production build completed successfully using Next.js 15.5.20. No applicatio
 - [x] Make MCP authentication fail closed. — fixed 2026-07-31, commit `15cd8e4`.
 - [ ] Upgrade vulnerable dependencies.
 - [x] Enforce owner/household authorization in server code. — fixed 2026-07-31, commit `c5d5631` (middleware-level; per-Server-Action defense in depth still open).
-- [ ] Add validation, rate limits, idempotency, and transactions.
-- [ ] Escape generated email HTML and restrict external fetching.
+- [~] Add validation, rate limits, idempotency, and transactions. — output validation done 2026-07-31, commit `750fa0b`; rate limits/idempotency/transactions still open.
+- [~] Escape generated email HTML and restrict external fetching. — escaping done 2026-07-31, commit `750fa0b`; external fetching only partially restricted (query-string stripping, no domain allowlist).
 - [ ] Add automated security and integration tests.
 - [ ] Improve review, reminder, calendar-sync, task, and grocery features.
 
@@ -139,7 +139,7 @@ Because dashboard code uses the service-role client, an unauthorized authenticat
 
 ### 6. Untrusted content is inserted into notification HTML
 
-**Status:** [ ] Not started
+**Status:** [x] Fixed (2026-07-31, commit `750fa0b`) — every free-text value (title, summary, subject, sender name) is now HTML-escaped before going into the notification email; `details_url` only renders as a link if it parses as a plain `https:` URL.
 
 **Location:** `app/api/inbound-email/route.ts`
 
@@ -155,7 +155,7 @@ Email-derived and model-derived fields are interpolated directly into outgoing H
 
 ### 7. Email prompt injection can corrupt trusted records
 
-**Status:** [ ] Not started
+**Status:** [~] Partially addressed (2026-07-31, commit `750fa0b`) — the model's output is now validated server-side before it reaches the database (`normalizeParsedOutput`): classification/event_type/priority must be a known value, dates/times must match the expected format or get dropped, free text is length-capped, arrays capped at 20 items. This closes off the "corrupt trusted records with garbage" risk. Not done: clearly delimiting email/webpage content as untrusted quoted data in the prompt itself, structured-output/schema-constrained model responses, confidence/evidence tracking, or a review step before trusting anything — deferred per user request to keep this pass lightweight (personal-use app).
 
 **Location:** `app/api/inbound-email/route.ts`
 
@@ -172,7 +172,7 @@ Raw email and fetched webpage content are sent directly to the model. A sender c
 
 ### 8. Private newsletter links are disclosed to a third-party reader
 
-**Status:** [ ] Not started
+**Status:** [~] Partially addressed (2026-07-31, commit `750fa0b`) — query strings (the usual home for signed/personalized recipient tokens) are now stripped before a link is sent to Jina Reader. Not done: domain allowlisting, making enrichment opt-in, or logging only the destination domain — deferred per user request to keep this pass lightweight.
 
 **Location:** `app/api/inbound-email/route.ts`
 
@@ -197,6 +197,8 @@ The parser submits links extracted from email HTML to Jina Reader. Newsletter li
 - `app/api/inbound-email/route.ts`
 
 Each accepted request may store large content, fetch three external pages, and invoke an expensive model. There is no message-level deduplication, strict request limit, rate limit, or cost quota.
+
+*Side note (2026-07-31, commit `750fa0b`): `INBOUND_SHARED_SECRET` comparison was switched to the same fail-closed, `timingSafeEqual` pattern used for MCP (same secret value, not a new finding from the original review, but the same class of issue as #3). The abuse-control items below are still open.*
 
 **Actions:**
 
