@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getHousehold } from '@/lib/household';
 import TripDayView from './TripDayView';
+import DeleteTripButton from './DeleteTripButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,16 +46,19 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div>
-        <Link href="/dashboard/trips" className="muted" style={{ fontSize: 13 }}>
-          ← All trips
-        </Link>
-        <h2 style={{ fontSize: 20, margin: '4px 0 0' }}>{trip.destination}</h2>
-        {trip.constraints?.accommodation_address && (
-          <p className="muted" style={{ fontSize: 13, margin: '2px 0 0' }}>
-            {trip.constraints.accommodation_address}
-          </p>
-        )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <Link href="/dashboard/trips" className="muted" style={{ fontSize: 13 }}>
+            ← All trips
+          </Link>
+          <h2 style={{ fontSize: 20, margin: '4px 0 0' }}>{trip.destination}</h2>
+          {trip.constraints?.accommodation_address && (
+            <p className="muted" style={{ fontSize: 13, margin: '2px 0 0' }}>
+              {trip.constraints.accommodation_address}
+            </p>
+          )}
+        </div>
+        <DeleteTripButton tripId={trip.id} destination={trip.destination} />
       </div>
 
       {days?.length ? (

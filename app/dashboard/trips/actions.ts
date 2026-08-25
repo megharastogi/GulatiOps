@@ -37,6 +37,26 @@ function isValidTimeRange(start?: string | null, end?: string | null) {
   return end > start;
 }
 
+export async function deleteTrip(tripId: string) {
+  const supabase = createAdminClient();
+  const household = await getHousehold();
+
+  // trip_days/trip_activities both have `on delete cascade` FKs to trips
+  // (schema.sql), so deleting the trip row removes everything under it.
+  const { error, data } = await supabase
+    .from('trips')
+    .delete()
+    .eq('id', tripId)
+    .eq('household_id', household.id)
+    .select('id');
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: 'Trip not found.' };
+
+  revalidatePath('/dashboard/trips');
+  revalidatePath('/dashboard'); // the "Today on your trip" section also depends on trips
+  return { ok: true };
+}
+
 export async function updateTripNotes(tripId: string, notes: string) {
   const supabase = createAdminClient();
   const household = await getHousehold();
