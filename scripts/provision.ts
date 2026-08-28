@@ -3,8 +3,10 @@
 // Two jobs, both run against a database that has had the multi-household
 // migration at the bottom of schema.sql applied:
 //
-//   npm run provision -- --upgrade-owner
-//       One-time. Backfills your existing household with the columns the
+//   npm run provision -- --upgrade-owner --address chief@yourrealdomain.xyz
+//       One-time. --address must match the Cloudflare Email Routing rule that
+//       already forwards your school mail; it defaults to chief@$MAIL_DOMAIN.
+//       Backfills your existing household with the columns the
 //       multi-tenant code now expects (features, inbound_address,
 //       invited_email) and links your existing Supabase auth user to it.
 //       Run this BEFORE deploying, or you'll lock yourself out — middleware
@@ -30,13 +32,12 @@ const supabase = createClient(
 
 // The domain your Cloudflare Email Routing rules live on. Addresses are
 // built as <address>@<MAIL_DOMAIN>.
-const MAIL_DOMAIN = process.env.MAIL_DOMAIN || 'yourdomain.xyz';
+const MAIL_DOMAIN = process.env.MAIL_DOMAIN || 'gulatiops.org';
 const APP_URL = process.env.APP_URL || 'https://gulati-ops.vercel.app';
 
 // ---- your household, for --upgrade-owner ----
 const OWNER = {
   digest_email: 'meghagulati30@gmail.com',
-  inbound_address: `chief@${MAIL_DOMAIN}`,
   features: ['email', 'tasks', 'groceries', 'calendar', 'trips'],
 };
 
@@ -48,17 +49,27 @@ function flag(name: string): boolean {
   return process.argv.includes(`--${name}`);
 }
 
+// Accepts either a bare local part ('smith') or a full address
+// ('smith@example.com'), so MAIL_DOMAIN is a convenience, not a constraint.
+function toAddress(value: string): string {
+  return value.includes('@') ? value.trim().toLowerCase() : `${value.trim().toLowerCase()}@${MAIL_DOMAIN}`;
+}
+
 function mintToken() {
   const token = randomBytes(32).toString('base64url');
   return { token, hash: createHash('sha256').update(token, 'utf8').digest('hex') };
 }
 
 async function upgradeOwner() {
+  // Must match the Cloudflare Email Routing rule that already forwards your
+  // school mail — if it doesn't, your own inbound email stops resolving.
+  const ownerAddress = toAddress(arg('address') || 'chief');
+
   const { data: household, error } = await supabase
     .from('households')
     .update({
       features: OWNER.features,
-      inbound_address: OWNER.inbound_address,
+      inbound_address: ownerAddress,
       invited_email: OWNER.digest_email,
     })
     .eq('digest_email', OWNER.digest_email)
@@ -104,7 +115,7 @@ async function upgradeOwner() {
 
   console.log(`✓ Upgraded household "${household.name}"`);
   console.log(`  features:        ${OWNER.features.join(', ')}`);
-  console.log(`  inbound address: ${OWNER.inbound_address}`);
+  console.log(`  inbound address: ${ownerAddress}`);
   console.log(`\n  New MCP URL (replaces your old connector — copy it now):`);
   console.log(`  ${APP_URL}/api/mcp?secret=${token}\n`);
 }
@@ -118,7 +129,7 @@ async function provisionFamily() {
     throw new Error('--family, --email and --address are all required.');
   }
 
-  const inboundAddress = address.includes('@') ? address : `${address}@${MAIL_DOMAIN}`;
+  const inboundAddress = toAddress(address);
 
   const { data: household, error } = await supabase
     .from('households')

@@ -81,16 +81,16 @@ a test user under OAuth consent screen.
    - `INBOUND_SHARED_SECRET` = same value you used in Vercel
 5. Settings → Triggers → enable **Email** trigger.
 6. Email Routing → Routing Rules → Create rule:
-   `chief@yourdomain.xyz` → Send to a Worker → pick this Worker.
+   `chief@gulatiops.org` → Send to a Worker → pick this Worker.
 
 ### 7. Gmail forwarding filter
 
-1. In your real Gmail, Settings → Forwarding → add `chief@yourdomain.xyz` as a
+1. In your real Gmail, Settings → Forwarding → add `chief@gulatiops.org` as a
    forwarding address. Gmail sends a verification code there — pull it from
    the Supabase `inbound_emails` table (it'll show up after step 6 is live).
 2. Once verified, create a filter:
    `from:(@yourschool.org OR schoolmessenger.com OR ptboard.com)` → "Forward to
-   chief@yourdomain.xyz". You can also forward by labels.
+   chief@gulatiops.org". You can also forward by labels.
 
 Tip: start by manually forwarding a few real school emails first to test the
 parser, *then* enable the filter.

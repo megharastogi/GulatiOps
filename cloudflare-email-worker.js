@@ -1,7 +1,7 @@
 // cloudflare-email-worker.js
 // Deploy this as a Cloudflare Email Worker.
-// Set up Email Routing: chief@yourdomain.com -> this worker.
-// Then forward school emails to chief@yourdomain.com from Gmail filters.
+// Set up Email Routing: chief@gulatiops.org -> this worker.
+// Then forward school emails to chief@gulatiops.org from Gmail filters.
 
 import PostalMime from 'postal-mime';
 
