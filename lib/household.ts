@@ -77,7 +77,7 @@ export async function getHouseholdForUser(authUserId: string): Promise<Household
   return (household as Household) ?? null;
 }
 
-/** Household that owns a forwarding address, e.g. 'smith@yourdomain.xyz'. */
+/** Household that owns a forwarding address, e.g. 'smith@gulatiops.org'. */
 export async function getHouseholdByInboundAddress(
   address: string
 ): Promise<Household | null> {
