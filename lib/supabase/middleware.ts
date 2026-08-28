@@ -27,33 +27,51 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // A valid Supabase session isn't the same as being authorized — anyone
-  // with the (public, browser-shipped) anon key could sign up directly
-  // against Supabase Auth, bypassing this app's own magic-link allowlist
-  // in login/actions.ts, and previously would have inherited full access
-  // to this household's data (dashboard pages/Server Actions use the
-  // service-role client, which doesn't check identity on its own).
-  const ownerEmail = process.env.PRIMARY_DIGEST_EMAIL?.trim().toLowerCase();
-  const isOwner = !!user && !!ownerEmail && user.email?.trim().toLowerCase() === ownerEmail;
-
   const isAuthRoute =
     request.nextUrl.pathname.startsWith('/login') ||
     request.nextUrl.pathname.startsWith('/auth');
 
-  if (!isOwner && !isAuthRoute) {
+  // A valid Supabase session isn't the same as being authorized — anyone with
+  // the (public, browser-shipped) anon key could sign up directly against
+  // Supabase Auth, bypassing the invite flow in auth/callback. Authorization
+  // is membership in a household, nothing else.
+  //
+  // This runs on the *user-scoped* client, so it reads through the
+  // household_users_self RLS policy rather than trusting an env var. If the
+  // multi-household migration in schema.sql hasn't been applied, this query
+  // returns nothing and everyone is locked out — fail-closed, and the
+  // ?error=no_household redirect below says which case it is.
+  let householdId: string | null = null;
+  if (user) {
+    const { data } = await supabase
+      .from('household_users')
+      .select('household_id')
+      .eq('auth_user_id', user.id)
+      .limit(1)
+      .maybeSingle();
+    householdId = data?.household_id ?? null;
+  }
+
+  if (!householdId && !isAuthRoute) {
     if (user) {
-      // Signed in, but not the household owner — destroy the session
-      // rather than just declining to route them, so it can't be reused.
+      // Signed in but attached to no household — destroy the session rather
+      // than just declining to route them, so it can't be reused.
       await supabase.auth.signOut();
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      url.searchParams.set('error', 'no_household');
+      return NextResponse.redirect(url);
     }
     const url = request.nextUrl.clone();
     url.pathname = '/login';
+    url.search = '';
     return NextResponse.redirect(url);
   }
 
-  if (isOwner && request.nextUrl.pathname === '/login') {
+  if (householdId && request.nextUrl.pathname === '/login') {
     const url = request.nextUrl.clone();
     url.pathname = '/dashboard';
+    url.search = '';
     return NextResponse.redirect(url);
   }
 

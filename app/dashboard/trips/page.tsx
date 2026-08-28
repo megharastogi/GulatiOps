@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getHousehold } from '@/lib/household';
+import { requireFeature } from '@/lib/household';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +35,7 @@ function TripCard({ trip, badge }: { trip: Trip; badge: string }) {
 }
 
 export default async function TripsPage() {
-  const household = await getHousehold();
+  const household = await requireFeature('trips');
   const supabase = createAdminClient();
 
   const { data: trips } = await supabase

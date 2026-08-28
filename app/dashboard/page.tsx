@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { createAdminClient } from '@/lib/supabase/admin';
-import { getHousehold } from '@/lib/household';
+import { createClient } from '@/lib/supabase/server';
+import { getHousehold, hasFeature } from '@/lib/household';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +23,9 @@ function formatTime12(t: string | null) {
 
 export default async function DashboardHome() {
   const household = await getHousehold();
-  const supabase = createAdminClient();
+  // User-scoped client: every query below is additionally constrained by the
+  // RLS policies, so a missing household filter can't reach another family.
+  const supabase = await createClient();
 
   const today = new Date().toISOString().slice(0, 10);
   const twoWeeks = new Date();
@@ -53,7 +55,7 @@ export default async function DashboardHome() {
       .gte('end_date', today),
   ]);
 
-  const activeTrip = activeTrips?.[0] ?? null;
+  const activeTrip = hasFeature(household, 'trips') ? (activeTrips?.[0] ?? null) : null;
   let todayDayId: string | null = null;
   let todayActivities: any[] = [];
   if (activeTrip) {

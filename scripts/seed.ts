@@ -1,5 +1,7 @@
 // scripts/seed.ts
 // Run once after applying schema.sql to insert your household + members.
+// For additional families use scripts/provision.ts instead — this script
+// predates multi-tenancy and only sets up the first household.
 // Usage: SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npx tsx scripts/seed.ts
 
 import { createClient } from '@supabase/supabase-js';
@@ -63,7 +65,8 @@ async function main() {
   }
 
   console.log('\nDone. Set this in Vercel env vars:');
-  console.log(`PRIMARY_DIGEST_EMAIL=${HOUSEHOLD.digest_email}`);
+  console.log('\nNext: npm run provision -- --upgrade-owner');
+  console.log('(PRIMARY_DIGEST_EMAIL is no longer used — authorization is household membership.)');
 }
 
 main().catch((e) => {

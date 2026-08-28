@@ -1,15 +1,14 @@
 // Step 2 of Google Calendar OAuth: exchange code for tokens, store in Supabase.
 //
-// Gated by middleware.ts (must be signed in as the owner). Also verifies the
-// `state` param against the cookie set in google-oauth/route.ts, and the
-// signed-in user's email against PRIMARY_DIGEST_EMAIL as defense in depth —
-// without these, anyone who could get this URL loaded in an authorized
-// browser could rebind the household's calendar to an attacker's account.
+// Gated by middleware.ts (must be signed in). Also verifies the `state` param
+// against the cookie set in google-oauth/route.ts, and that the signed-in
+// user's household actually has the calendar feature — without these, anyone
+// who could get this URL loaded in an authorized browser could rebind a
+// household's calendar to an attacker's account.
 
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
-import { createClient as createAuthClient } from '@/lib/supabase/server';
-import { getHousehold } from '@/lib/household';
+import { getHousehold, hasFeature } from '@/lib/household';
 import { encryptToken, decryptToken } from '@/lib/token-crypto';
 
 const supabase = createClient(
@@ -18,13 +17,8 @@ const supabase = createClient(
 );
 
 export async function GET(request: Request) {
-  const authClient = await createAuthClient();
-  const {
-    data: { user },
-  } = await authClient.auth.getUser();
-
-  const ownerEmail = process.env.PRIMARY_DIGEST_EMAIL?.trim().toLowerCase();
-  if (!user || !ownerEmail || user.email?.trim().toLowerCase() !== ownerEmail) {
+  const household = await getHousehold().catch(() => null);
+  if (!household || !hasFeature(household, 'calendar')) {
     return new Response('Not authorized to connect this calendar.', { status: 403 });
   }
 
@@ -60,9 +54,6 @@ export async function GET(request: Request) {
 
   const tokens = await tokenResp.json();
   // { access_token, refresh_token, expires_in, scope, token_type }
-
-  const household = await getHousehold().catch(() => null);
-  if (!household) return new Response('Household not seeded yet', { status: 500 });
 
   // Google only returns refresh_token on the first consent (or when
   // prompt=consent forces re-issuance, which google-oauth/route.ts sets —

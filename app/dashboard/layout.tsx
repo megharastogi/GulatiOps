@@ -1,14 +1,20 @@
 import Link from 'next/link';
 import { signOut } from './actions';
+import { getHousehold, hasFeature, type Feature } from '@/lib/household';
 
-const TABS = [
-  { href: '/dashboard', label: 'Home' },
-  { href: '/dashboard/todo', label: 'Todo' },
-  { href: '/dashboard/groceries', label: 'Groceries' },
-  { href: '/dashboard/trips', label: 'Trips' },
+// `feature: null` means always shown. Everything else appears only for
+// households that opted into it, so a family with {email,tasks} never sees a
+// tab leading to a page they can't use.
+const TABS: { href: string; label: string; feature: Feature | null }[] = [
+  { href: '/dashboard', label: 'Home', feature: null },
+  { href: '/dashboard/todo', label: 'Todo', feature: null },
+  { href: '/dashboard/groceries', label: 'Groceries', feature: 'groceries' },
+  { href: '/dashboard/trips', label: 'Trips', feature: 'trips' },
 ];
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const household = await getHousehold();
+  const tabs = TABS.filter((tab) => !tab.feature || hasFeature(household, tab.feature));
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <header
@@ -36,7 +42,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           overflowX: 'auto',
         }}
       >
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <Link
             key={tab.href}
             href={tab.href}

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getHousehold } from '@/lib/household';
+import { requireFeature } from '@/lib/household';
 import TripDayView from './TripDayView';
 import DeleteTripButton from './DeleteTripButton';
 
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function TripDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const household = await getHousehold();
+  const household = await requireFeature('trips');
   const supabase = createAdminClient();
 
   const { data: trip } = await supabase

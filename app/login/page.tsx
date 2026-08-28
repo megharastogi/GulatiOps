@@ -1,19 +1,21 @@
-'use client';
+import LoginForm from './LoginForm';
 
-import { useFormState, useFormStatus } from 'react-dom';
-import { requestMagicLink } from './actions';
+// Signed-in-but-unauthorized users land back here with a reason. The
+// no_household case is worth naming explicitly: it's what you see if the
+// multi-household migration in schema.sql hasn't been applied yet, and
+// without the message it looks like a silent redirect loop.
+const NOTICES: Record<string, string> = {
+  auth: 'That sign-in link is invalid or has expired. Request a new one.',
+  no_household:
+    'That account is not attached to a household yet. Ask Megha to add you.',
+};
 
-function SubmitButton() {
-  const { pending } = useFormStatus();
-  return (
-    <button type="submit" className="btn" disabled={pending} style={{ width: '100%' }}>
-      {pending ? 'Sending…' : 'Send magic link'}
-    </button>
-  );
-}
-
-export default function LoginPage() {
-  const [state, formAction] = useFormState(requestMagicLink, {});
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
 
   return (
     <main
@@ -25,35 +27,7 @@ export default function LoginPage() {
         padding: 24,
       }}
     >
-      <div className="card" style={{ width: '100%', maxWidth: 360 }}>
-        <h1 style={{ fontSize: 22, marginBottom: 4 }}>GulatiOps</h1>
-        <p className="muted" style={{ marginTop: 0, marginBottom: 20, fontSize: 14 }}>
-          Sign in with a magic link.
-        </p>
-
-        {state.sent ? (
-          <p>Check your email for a sign-in link. You can close this tab.</p>
-        ) : (
-          <form action={formAction} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <input
-              type="email"
-              name="email"
-              placeholder="you@example.com"
-              required
-              autoComplete="email"
-              style={{
-                padding: '10px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--border)',
-                background: 'var(--bg)',
-                color: 'var(--text)',
-              }}
-            />
-            <SubmitButton />
-            {state.error && <p className="error">{state.error}</p>}
-          </form>
-        )}
-      </div>
+      <LoginForm notice={error ? NOTICES[error] : undefined} />
     </main>
   );
 }

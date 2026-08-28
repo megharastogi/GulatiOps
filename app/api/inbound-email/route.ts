@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { Resend } from 'resend';
 import { timingSafeEqual } from 'crypto';
-import { getHousehold } from '@/lib/household';
+import { getHouseholdByInboundAddress, type Household } from '@/lib/household';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -46,15 +46,51 @@ function safeHttpsUrl(value: unknown): string | null {
   }
 }
 
+// Cloudflare's worker hands us headers as a plain object with whatever case
+// the sending server used, so match case-insensitively.
+function extractMessageId(headers: unknown): string | null {
+  if (!headers || typeof headers !== 'object') return null;
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (key.toLowerCase() === 'message-id' && typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed.slice(0, 500);
+    }
+  }
+  return null;
+}
+
 export async function POST(request: Request) {
   if (!verifySharedSecret(request)) return new Response(null, { status: 401 });
 
   const { from, fromName, to, subject, text, html, headers } = await request.json();
 
-  // For single-household MVP, resolve household by the `to` address
-  const household = await getHousehold().catch(() => null);
+  // Route on the address it was sent to. Every household has its own
+  // forwarding address, so this is what decides whose data this becomes.
+  const household = await getHouseholdByInboundAddress(String(to || ''));
   if (!household) {
-    return Response.json({ error: 'no household configured' }, { status: 500 });
+    // 200, not 4xx: the worker throws on a non-OK response to trigger a
+    // Cloudflare retry, and retrying mail for an address nobody owns would
+    // just loop. Log it and drop it.
+    console.warn('inbound email for unknown address', to);
+    return Response.json({ ok: true, ignored: 'unknown address' });
+  }
+
+  // The worker retries on any non-OK response, so a function that inserted
+  // rows and then timed out before returning 200 would re-parse on the retry
+  // and duplicate every event and action item. The Message-ID makes the whole
+  // handler idempotent: a redelivery of the same message is a no-op.
+  const messageId = extractMessageId(headers);
+  if (messageId) {
+    const { data: seen } = await supabase
+      .from('inbound_emails')
+      .select('id')
+      .eq('household_id', household.id)
+      .eq('message_id', messageId)
+      .maybeSingle();
+
+    if (seen) {
+      return Response.json({ ok: true, email_id: seen.id, duplicate: true });
+    }
   }
 
   // 1. Store raw email immediately (durability before parsing)
@@ -62,6 +98,7 @@ export async function POST(request: Request) {
     .from('inbound_emails')
     .insert({
       household_id: household.id,
+      message_id: messageId,
       from_address: from,
       from_name: fromName,
       to_address: to,
@@ -74,6 +111,11 @@ export async function POST(request: Request) {
     .single();
 
   if (insertErr) {
+    // A unique-violation here means a concurrent redelivery won the race —
+    // that's the index doing its job, not a failure worth retrying.
+    if (insertErr.code === '23505') {
+      return Response.json({ ok: true, duplicate: true });
+    }
     console.error('insert failed', insertErr);
     return Response.json({ error: 'insert failed' }, { status: 500 });
   }
@@ -214,12 +256,20 @@ async function parseAndProcessEmail(emailId: string, household: any) {
     .select('name, role, notes')
     .eq('household_id', household.id);
 
+  // Free-text the household wrote about itself: "we skip PTA fundraisers",
+  // "our 2nd grader is in Mr. Alvarez's class". Written by the household owner
+  // about their own household, so it can only ever shape their own parses —
+  // and normalizeParsedOutput still clamps whatever comes back.
+  const householdInstructions = household.parser_instructions?.trim()
+    ? `\nHousehold preferences (follow these):\n${household.parser_instructions.trim()}\n`
+    : '';
+
   const parserPrompt = `You are parsing an email that was forwarded into a family's
 "chief of staff" system. Extract structured information.
 
 Today's date: ${today}
 Household members: ${JSON.stringify(householdMembers.data)}
-
+${householdInstructions}
 Email:
 From: ${email.from_name || ''} <${email.from_address}>
 Subject: ${email.subject}
@@ -269,7 +319,7 @@ Rules:
 - If nothing extractable, return empty arrays for school_events and action_items`;
 
   const parseResp = await anthropic.messages.create({
-    model: 'claude-opus-4-8',
+    model: 'claude-opus-5',
     max_tokens: 2000,
     messages: [{ role: 'user', content: parserPrompt }],
   });
@@ -365,8 +415,17 @@ async function sendPerEmailSummary(household: any, email: any, parsed: any) {
     <p style="color:#888;font-size:12px">Original subject: ${escapeHtml(email.subject)}</p>
   `;
 
+  // This was hardcoded to the template placeholder chief@yourdomain.com,
+  // which Resend rejects as an unverified sending domain — so these summaries
+  // were failing silently inside the `if (shouldNotify && resend)` above.
+  const fromAddress = process.env.NOTIFY_FROM_EMAIL;
+  if (!fromAddress) {
+    console.error('NOTIFY_FROM_EMAIL is not set — skipping summary email.');
+    return;
+  }
+
   await resend.emails.send({
-    from: 'House Chief of Staff <chief@yourdomain.com>',
+    from: fromAddress,
     to: household.digest_email,
     subject: `${urgencyBadge}: ${email.subject}`,
     html,

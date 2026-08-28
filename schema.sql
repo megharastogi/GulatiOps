@@ -255,3 +255,143 @@ alter table trip_activities enable row level security;
 -- alter table trip_activities add column start_time time;
 -- alter table trip_activities add column end_time time;
 -- alter table trip_activities add column participants text not null default 'everyone';
+
+-- ============================================================
+-- MULTI-HOUSEHOLD MIGRATION
+-- ============================================================
+-- Turns the single-household app into a multi-tenant one. Everything here
+-- is additive and idempotent — apply it to a live database with no downtime.
+-- Existing behaviour is unchanged on application: the service-role key
+-- bypasses RLS entirely, so every current code path keeps working until it
+-- is deliberately moved to the user-scoped client.
+
+-- ---------- per-household configuration ----------
+
+-- Which parts of the app this household can see. Read in three places:
+-- the MCP tools/list response, the dashboard tab list, and page guards.
+alter table households add column if not exists features text[] not null default '{email,tasks}';
+
+-- The address school email is forwarded to, e.g. 'smith@yourdomain.xyz'.
+-- The inbound webhook routes on this instead of a single env var.
+alter table households add column if not exists inbound_address text;
+
+-- Free-text appended to the parser prompt, written by the household itself:
+-- "we skip PTA fundraisers", "our 2nd grader is in Mr. Alvarez's class".
+alter table households add column if not exists parser_instructions text;
+
+-- Set before a family's first sign-in. The auth callback consumes it to
+-- attach their new Supabase user to this household exactly once.
+alter table households add column if not exists invited_email text;
+
+create unique index if not exists households_inbound_address_key
+  on households (lower(inbound_address)) where inbound_address is not null;
+create unique index if not exists households_invited_email_key
+  on households (lower(invited_email)) where invited_email is not null;
+
+-- ---------- logins ----------
+
+-- Deliberately separate from household_members: that table models the family
+-- (kids, grandparents, birthdays, allergy notes), this one models who can log
+-- in. A 6-year-old is a member, not a user. Both parents can be users of one
+-- household, which the previous single-email allowlist couldn't express.
+create table if not exists household_users (
+  household_id uuid not null references households(id) on delete cascade,
+  auth_user_id uuid not null,
+  role text not null default 'member',   -- 'owner' | 'member'
+  created_at timestamptz default now(),
+  primary key (household_id, auth_user_id)
+);
+
+create index if not exists household_users_auth_user_idx
+  on household_users (auth_user_id);
+
+-- ---------- MCP access ----------
+
+-- One token per household, replacing the single MCP_SHARED_SECRET. Only the
+-- SHA-256 hash is stored: a database leak doesn't hand over live credentials.
+create table if not exists mcp_tokens (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references households(id) on delete cascade,
+  token_hash text not null unique,
+  label text,
+  created_at timestamptz default now(),
+  revoked_at timestamptz
+);
+
+create index if not exists mcp_tokens_household_idx on mcp_tokens (household_id);
+
+-- ---------- inbound idempotency ----------
+
+-- The Cloudflare email worker throws on a non-OK response so Cloudflare
+-- retries. Without a dedupe key, a function that inserted rows and then timed
+-- out before returning 200 would re-parse and duplicate every event and
+-- action item on the retry.
+alter table inbound_emails add column if not exists message_id text;
+
+create unique index if not exists inbound_emails_message_id_key
+  on inbound_emails (household_id, message_id) where message_id is not null;
+
+-- ============================================================
+-- ROW LEVEL SECURITY POLICIES
+-- ============================================================
+-- Until now every table had RLS enabled with no policies — correct for a
+-- single household reached only through the service-role key, but with more
+-- than one family in the database, application-level `.eq('household_id')`
+-- filters become the only thing separating them. These policies make the
+-- database enforce it, so a forgotten filter fails closed instead of leaking.
+--
+-- The service-role key bypasses RLS, so paths with no user session (the
+-- inbound webhook, the MCP route, Google token storage) are unaffected.
+
+alter table household_users enable row level security;
+alter table mcp_tokens enable row level security;
+
+-- Resolves the calling user's households. SECURITY DEFINER so it can read
+-- household_users without the policy on that table recursing into itself.
+create or replace function auth_household_ids()
+returns setof uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select household_id from household_users where auth_user_id = auth.uid()
+$$;
+
+revoke all on function auth_household_ids() from public;
+grant execute on function auth_household_ids() to authenticated;
+
+-- A user sees their own membership rows and nothing else.
+drop policy if exists household_users_self on household_users;
+create policy household_users_self on household_users
+  for select to authenticated
+  using (auth_user_id = (select auth.uid()));
+
+-- The household record itself.
+drop policy if exists households_member_read on households;
+create policy households_member_read on households
+  for select to authenticated
+  using (id in (select auth_household_ids()));
+
+-- Every household-scoped table gets the same policy shape. Uniformity is the
+-- point: one rule to verify rather than a map of which tables are protected.
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'household_members', 'inbound_emails', 'school_calendar', 'action_items',
+    'grocery_items', 'grocery_pending', 'notifications_sent',
+    'trips', 'trip_days', 'trip_activities'
+  ]
+  loop
+    execute format('drop policy if exists %I on %I', t || '_household_rw', t);
+    execute format(
+      'create policy %I on %I for all to authenticated using (household_id in (select auth_household_ids())) with check (household_id in (select auth_household_ids()))',
+      t || '_household_rw', t
+    );
+  end loop;
+end $$;
+
+-- google_oauth_tokens and mcp_tokens deliberately get NO policy. They hold
+-- credential material and are only ever touched server-side with the
+-- service-role key; under RLS default-deny, `authenticated` gets nothing.

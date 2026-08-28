@@ -1,11 +1,11 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createAdminClient } from '@/lib/supabase/admin';
+import { createClient } from '@/lib/supabase/server';
 import { getHousehold } from '@/lib/household';
 
 export async function markDone(id: string) {
-  const supabase = createAdminClient();
+  const supabase = await createClient();
   const household = await getHousehold();
 
   await supabase
@@ -23,7 +23,7 @@ export async function addActionItem(formData: FormData) {
   if (!title) return;
 
   const dueDate = String(formData.get('due_date') || '').trim();
-  const supabase = createAdminClient();
+  const supabase = await createClient();
   const household = await getHousehold();
 
   await supabase.from('action_items').insert({

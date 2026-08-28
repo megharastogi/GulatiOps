@@ -2,9 +2,13 @@
 // Connect this URL to claude.ai as a custom connector.
 
 import { createClient } from '@supabase/supabase-js';
-import { timingSafeEqual } from 'crypto';
 import { checkBusy, createEvent, listEvents, deleteEvent } from '@/lib/google-calendar';
-import { getHousehold } from '@/lib/household';
+import {
+  getHouseholdByMcpToken,
+  hasFeature,
+  type Feature,
+  type Household,
+} from '@/lib/household';
 import { extractTimeFromText } from '@/lib/extract-time';
 
 const supabase = createClient(
@@ -12,23 +16,64 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// Fails CLOSED: a missing/misconfigured MCP_SHARED_SECRET means no access,
-// not open access. A previous version treated an unset secret as "auth not
-// required," which would silently expose every tool (including destructive
-// ones) if the env var was ever missing on a deploy.
-function isAuthorizedMcpRequest(request: Request): boolean {
-  const secret = process.env.MCP_SHARED_SECRET;
-  if (!secret) return false;
-
+// Resolves the calling household from its MCP token, or null.
+//
+// Fails CLOSED, and now does double duty: the token no longer just proves
+// "someone is allowed in", it identifies *which* household is calling. There
+// is no fallback to a default household — an unknown, revoked, or missing
+// token returns null and the request is rejected. Tokens are looked up by
+// SHA-256 hash, so the database never holds a usable credential.
+async function resolveMcpHousehold(request: Request): Promise<Household | null> {
   const { searchParams } = new URL(request.url);
   // Query-string auth is kept only because the claude.ai connector UI
   // doesn't support custom headers — note it can still leak via logs/history.
   const provided = request.headers.get('x-mcp-secret') || searchParams.get('secret') || '';
+  if (!provided) return null;
 
-  const providedBuf = Buffer.from(provided);
-  const secretBuf = Buffer.from(secret);
-  if (providedBuf.length !== secretBuf.length) return false;
-  return timingSafeEqual(providedBuf, secretBuf);
+  return getHouseholdByMcpToken(provided);
+}
+
+// Which feature each tool belongs to. A household only ever sees tools whose
+// feature it has, because Claude will confidently offer to use any tool it can
+// see — an unfiltered list means offering to plan a trip for a family that has
+// no trips, then erroring.
+const TOOL_FEATURES: Record<string, Feature> = {
+  list_action_items: 'tasks',
+  add_action_item: 'tasks',
+  mark_action_done: 'tasks',
+  list_school_events: 'tasks',
+  list_household_members: 'tasks',
+  weekly_digest: 'tasks',
+  recent_emails: 'email',
+
+  add_grocery_item: 'groceries',
+  list_grocery_pending: 'groceries',
+  clear_grocery_list: 'groceries',
+  remove_grocery_item: 'groceries',
+
+  check_calendar_busy: 'calendar',
+  create_calendar_event: 'calendar',
+  list_calendar_events: 'calendar',
+  delete_calendar_event: 'calendar',
+
+  create_trip: 'trips',
+  save_trip_day_activities: 'trips',
+  get_trip_itinerary: 'trips',
+  update_trip_activity: 'trips',
+  list_trips: 'trips',
+  delete_trip: 'trips',
+};
+
+function isToolAllowed(household: Household, name: string): boolean {
+  const feature = TOOL_FEATURES[name];
+  // An unmapped tool is a new one someone forgot to classify. Deny it rather
+  // than exposing it to every household by default.
+  if (!feature) return false;
+  return hasFeature(household, feature);
+}
+
+function toolsFor(household: Household) {
+  return TOOLS.filter((tool) => isToolAllowed(household, tool.name));
 }
 
 // Compares "HH:MM" strings; returns true if start/end are missing or end > start.
@@ -353,8 +398,7 @@ const TOOLS = [
 ];
 
 // -------- tool implementations --------
-async function callTool(name: string, args: any) {
-  const household = await getHousehold();
+async function callTool(name: string, args: any, household: Household) {
 
   switch (name) {
     case 'list_action_items': {
@@ -825,7 +869,8 @@ async function callTool(name: string, args: any) {
 
 // -------- MCP JSON-RPC handler --------
 export async function POST(request: Request) {
-  if (!isAuthorizedMcpRequest(request)) {
+  const household = await resolveMcpHousehold(request);
+  if (!household) {
     return Response.json({ error: 'unauthorized' }, { status: 401 });
   }
 
@@ -839,17 +884,26 @@ export async function POST(request: Request) {
         result: {
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'house-chief-of-staff', version: '0.1.0' },
+          serverInfo: { name: `house-chief-of-staff (${household.name})`, version: '0.2.0' },
         },
       });
     }
 
     if (method === 'tools/list') {
-      return Response.json({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
+      return Response.json({ jsonrpc: '2.0', id, result: { tools: toolsFor(household) } });
     }
 
     if (method === 'tools/call') {
-      const result = await callTool(params.name, params.arguments || {});
+      // Re-check rather than trusting that the client only calls what it was
+      // listed. tools/list is a hint; this is the boundary.
+      if (!isToolAllowed(household, params.name)) {
+        return Response.json({
+          jsonrpc: '2.0',
+          id,
+          error: { code: -32601, message: `Unknown tool: ${params.name}` },
+        });
+      }
+      const result = await callTool(params.name, params.arguments || {}, household);
       return Response.json({
         jsonrpc: '2.0',
         id,

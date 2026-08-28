@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/supabase/admin';
+import { createClient } from '@/lib/supabase/server';
 import { getHousehold } from '@/lib/household';
 import { markDone, addActionItem } from './actions';
 
@@ -13,7 +13,9 @@ function formatDate(dateStr: string) {
 
 export default async function TodoPage() {
   const household = await getHousehold();
-  const supabase = createAdminClient();
+  // User-scoped client: reads go through the RLS policies rather than
+  // relying on the .eq('household_id') filter below being remembered.
+  const supabase = await createClient();
 
   const { data: items } = await supabase
     .from('action_items')

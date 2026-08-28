@@ -2,16 +2,16 @@
 // Visit https://<your-vercel-app>.vercel.app/api/google-oauth in your browser
 // after deploying to connect your calendar. One-time setup.
 //
-// Gated by middleware.ts (must be signed in) — magic-link login only ever
-// issues a session to PRIMARY_DIGEST_EMAIL, so reaching this route at all
-// already means you're the owner. The email check below is defense in
-// depth in case that assumption ever changes. The `state` cookie defends
-// against a CSRF-style attack where a signed-in owner is tricked into
+// Gated by middleware.ts (must be signed in to some household). Calendar is
+// a per-household feature, so the check below is what actually decides: only
+// a household with `calendar` in its features can bind a Google account, and
+// the tokens are stored against that household. The `state` cookie defends
+// against a CSRF-style attack where a signed-in user is tricked into
 // completing an OAuth flow initiated with an attacker's authorization code.
 
 import { NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
-import { createClient } from '@/lib/supabase/server';
+import { getHousehold, hasFeature } from '@/lib/household';
 
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
@@ -19,13 +19,8 @@ const SCOPES = [
 ].join(' ');
 
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const ownerEmail = process.env.PRIMARY_DIGEST_EMAIL?.trim().toLowerCase();
-  if (!user || !ownerEmail || user.email?.trim().toLowerCase() !== ownerEmail) {
+  const household = await getHousehold().catch(() => null);
+  if (!household || !hasFeature(household, 'calendar')) {
     return new Response('Not authorized to connect this calendar.', { status: 403 });
   }
 

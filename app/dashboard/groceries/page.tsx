@@ -1,11 +1,11 @@
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getHousehold } from '@/lib/household';
+import { requireFeature } from '@/lib/household';
 import { addGroceryItem, removeGroceryItem, clearGroceryList } from './actions';
 
 export const dynamic = 'force-dynamic';
 
 export default async function GroceriesPage() {
-  const household = await getHousehold();
+  const household = await requireFeature('groceries');
   const supabase = createAdminClient();
 
   const { data: items } = await supabase
