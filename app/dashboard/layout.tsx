@@ -8,6 +8,8 @@ import { getHousehold, hasFeature, type Feature } from '@/lib/household';
 const TABS: { href: string; label: string; feature: Feature | null }[] = [
   { href: '/dashboard', label: 'Home', feature: null },
   { href: '/dashboard/todo', label: 'Todo', feature: null },
+  { href: '/dashboard/week', label: 'Week', feature: null },
+  { href: '/dashboard/mail', label: 'Mail', feature: null },
   { href: '/dashboard/groceries', label: 'Groceries', feature: 'groceries' },
   { href: '/dashboard/trips', label: 'Trips', feature: 'trips' },
 ];
@@ -26,11 +28,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
         }}
       >
         <h1 style={{ fontSize: 18, margin: 0 }}>GulatiOps</h1>
-        <form action={signOut}>
-          <button type="submit" className="btn-ghost">
-            Sign out
-          </button>
-        </form>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Link href="/dashboard/setup" className="btn-ghost">
+            Setup
+          </Link>
+          <form action={signOut}>
+            <button type="submit" className="btn-ghost">
+              Sign out
+            </button>
+          </form>
+        </div>
       </header>
 
       <nav

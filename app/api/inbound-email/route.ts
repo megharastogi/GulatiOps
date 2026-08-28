@@ -375,8 +375,16 @@ Rules:
     parsed.classification === 'action_required' ||
     (parsed.classification === 'informational' && parsed.school_events?.length > 0);
 
+  // Notification is a side effect, not part of parsing. The caller records a
+  // parse_error on anything that throws out of here, and a bounced summary
+  // email would otherwise flag a perfectly good parse as failed — the rows
+  // are already written by this point.
   if (shouldNotify && resend) {
-    await sendPerEmailSummary(household, email, parsed);
+    try {
+      await sendPerEmailSummary(household, email, parsed);
+    } catch (e) {
+      console.error('summary email failed (parse itself was fine):', e);
+    }
   }
 }
 

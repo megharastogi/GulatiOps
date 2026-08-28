@@ -56,6 +56,14 @@ export default async function DashboardHome() {
   ]);
 
   const activeTrip = hasFeature(household, 'trips') ? (activeTrips?.[0] ?? null) : null;
+
+  // Nothing has ever arrived, so forwarding almost certainly isn't set up.
+  // The banner disappears on its own once the first email lands.
+  const { count: emailCount } = await supabase
+    .from('inbound_emails')
+    .select('id', { count: 'exact', head: true })
+    .eq('household_id', household.id);
+  const needsSetup = (emailCount ?? 0) === 0;
   let todayDayId: string | null = null;
   let todayActivities: any[] = [];
   if (activeTrip) {
@@ -85,6 +93,15 @@ export default async function DashboardHome() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {needsSetup && (
+        <Link href="/dashboard/setup" className="card" style={{ display: 'block' }}>
+          <div style={{ fontWeight: 600 }}>Finish setting up →</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            No email has arrived yet. Set up forwarding to get started.
+          </div>
+        </Link>
+      )}
+
       {activeTrip && (
         <section>
           <div
