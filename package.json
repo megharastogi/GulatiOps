@@ -8,7 +8,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "provision": "node --env-file=.env --import tsx/esm scripts/provision.ts"
+    "provision": "node --env-file=.env --import tsx/esm scripts/provision.ts",
+    "verify": "node --env-file=.env --import tsx/esm scripts/verify.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
