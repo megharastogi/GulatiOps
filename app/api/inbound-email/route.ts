@@ -6,6 +6,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Resend } from 'resend';
 import { timingSafeEqual } from 'crypto';
 import { getHouseholdByInboundAddress, type Household } from '@/lib/household';
+import { extractLinks, fetchNewsletterContent } from '@/lib/newsletter';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -202,35 +203,6 @@ function normalizeParsedOutput(raw: any) {
   };
 }
 
-function extractLinks(html: string): string[] {
-  const matches = [...html.matchAll(/href=["'](https?:\/\/[^"'\s>]+)["']/gi)];
-  return [...new Set(matches.map((m) => m[1]))]
-    .filter((url) => !/(unsubscribe|optout|pixel|beacon|open\.php|mailto)/i.test(url))
-    .slice(0, 3);
-}
-
-async function fetchNewsletterContent(url: string): Promise<string> {
-  try {
-    // Strip query params before handing the URL to a third party (Jina) —
-    // that's typically where signed/personalized tokens live (recipient
-    // IDs, tracking params). The newsletter body itself rarely depends on
-    // them, so this trades a little enrichment quality for not leaking
-    // per-recipient identifiers off-platform.
-    const stripped = new URL(url);
-    stripped.search = '';
-
-    // Use Jina Reader to handle JS-rendered pages (Smore, Peachjar, etc.)
-    const readerUrl = `https://r.jina.ai/${stripped.toString()}`;
-    const res = await fetch(readerUrl, {
-      headers: { Accept: 'text/plain' },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) return '';
-    return (await res.text()).slice(0, 4000);
-  } catch {
-    return '';
-  }
-}
 
 async function parseAndProcessEmail(emailId: string, household: any) {
   const { data: email } = await supabase
