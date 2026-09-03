@@ -163,7 +163,15 @@ function timeOrNull(value: unknown): string | null {
   return typeof value === 'string' && TIME_RE.test(value) ? value : null;
 }
 
-function normalizeParsedOutput(raw: any) {
+// The model is told which calendar rows already exist and may point a parsed
+// event at one of them. Anything that isn't verbatim an id we handed it in
+// THIS call is dropped to null: that blocks both hallucinated ids and any
+// attempt by a crafted email to name a row belonging to another household.
+function knownIdOrNull(value: unknown, knownIds: Set<string>): string | null {
+  return typeof value === 'string' && knownIds.has(value) ? value : null;
+}
+
+function normalizeParsedOutput(raw: any, knownIds: Set<string> = new Set()) {
   const school_events = Array.isArray(raw?.school_events)
     ? raw.school_events
         .slice(0, MAX_ITEMS)
@@ -176,6 +184,7 @@ function normalizeParsedOutput(raw: any) {
           start_time: timeOrNull(e?.start_time),
           end_time: timeOrNull(e?.end_time),
           location: truncateOrNull(e?.location, 200),
+          duplicate_of: knownIdOrNull(e?.duplicate_of, knownIds),
         }))
         // An event with no valid date isn't useful on a calendar and
         // shouldn't be stored — better to drop it than show "undefined".
@@ -203,6 +212,86 @@ function normalizeParsedOutput(raw: any) {
   };
 }
 
+
+// Everything on the household's calendar that a newly-arrived email could
+// plausibly be talking about. Reaches a little into the past because a weekly
+// update often recaps the last few days alongside the week ahead, and caps the
+// list so a household with a busy year can't crowd the email out of the prompt.
+async function fetchExistingEvents(householdId: string) {
+  const from = new Date();
+  from.setDate(from.getDate() - 14);
+  const { data } = await supabase
+    .from('school_calendar')
+    .select('id, title, event_type, start_date, start_time, end_date, end_time, location, description, source_email_id')
+    .eq('household_id', householdId)
+    .gte('start_date', from.toISOString().slice(0, 10))
+    .order('start_date', { ascending: true })
+    .limit(150);
+  return data || [];
+}
+
+// When each existing row's source email landed. Used to tell a genuinely
+// newer announcement from an old one arriving late.
+async function fetchSourceReceivedAt(existing: any[]): Promise<Map<string, string>> {
+  const ids = [...new Set(existing.map((e) => e.source_email_id).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const { data } = await supabase
+    .from('inbound_emails')
+    .select('id, received_at')
+    .in('id', ids);
+  return new Map((data || []).map((e: any) => [e.id, e.received_at]));
+}
+
+const MERGEABLE_FIELDS = [
+  'event_type', 'title', 'description',
+  'start_date', 'end_date', 'start_time', 'end_time', 'location',
+] as const;
+
+// Fold a freshly-parsed event into the row it duplicates, and return only the
+// columns that actually change.
+//
+// Newer wins: a later email is normally the more specific one ("First Day of
+// School" becomes "First Day of School - Noon Dismissal" once the school firms
+// up the schedule), and it is also how a corrected date is meant to land.
+//
+// But "later" means when the EMAIL arrived, not when we happened to parse it.
+// Mail gets forwarded out of order — a June year-at-a-glance newsletter can be
+// forwarded in today, long after August's weekly update already refined the
+// same event. Letting that overwrite would silently undo the better data, so an
+// older email may only fill in blanks, never replace an existing value.
+//
+// Either way a populated column is never overwritten with null: a terse email
+// that omits the location should not erase a location we already knew.
+function mergeIntoExisting(
+  existingRow: any,
+  evt: any,
+  emailId: string,
+  emailReceivedAt: string | null,
+  existingSourceReceivedAt: string | null
+): Record<string, any> {
+  // Unknown provenance (the source email was deleted) is treated as
+  // not-newer — without evidence this email is fresher, only fill gaps.
+  const isNewer =
+    !!emailReceivedAt &&
+    !!existingSourceReceivedAt &&
+    emailReceivedAt >= existingSourceReceivedAt;
+
+  const patch: Record<string, any> = {};
+  for (const field of MERGEABLE_FIELDS) {
+    const incoming = evt[field];
+    if (incoming === null || incoming === undefined) continue;
+    if (incoming === existingRow[field]) continue;
+    // Older email: contribute only what the row is missing.
+    if (!isNewer && existingRow[field] !== null && existingRow[field] !== undefined) continue;
+    patch[field] = incoming;
+  }
+
+  // Point the row at the email that best describes it now. Only when this one
+  // won the merge, so provenance keeps matching the data actually shown.
+  if (isNewer && Object.keys(patch).length > 0) patch.source_email_id = emailId;
+
+  return patch;
+}
 
 async function parseAndProcessEmail(emailId: string, household: any) {
   const { data: email } = await supabase
@@ -236,12 +325,28 @@ async function parseAndProcessEmail(emailId: string, household: any) {
     ? `\nHousehold preferences (follow these):\n${household.parser_instructions.trim()}\n`
     : '';
 
+  // Schools re-announce the same calendar in every weekly update, so the same
+  // real-world event arrives over and over in differently-worded emails. The
+  // Message-ID index upstream only stops the SAME email being parsed twice —
+  // it can't see that "All-School Mass" and "First All-School Mass" are one
+  // event. So hand the parser what's already on this household's calendar and
+  // let it point each parsed event at an existing row instead of adding a
+  // second one. Only this household's rows are fetched, which is also what
+  // makes the id whitelist in normalizeParsedOutput airtight.
+  const existing = await fetchExistingEvents(household.id);
+  const knownIds = new Set(existing.map((e) => e.id));
+  const existingSection = existing.length
+    ? `\nAlready on this family's calendar (do NOT add these again — reference them by id instead):\n${existing
+        .map((e) => `- id=${e.id} | ${e.start_date} | ${e.event_type} | ${e.title}`)
+        .join('\n')}\n`
+    : '';
+
   const parserPrompt = `You are parsing an email that was forwarded into a family's
 "chief of staff" system. Extract structured information.
 
 Today's date: ${today}
 Household members: ${JSON.stringify(householdMembers.data)}
-${householdInstructions}
+${householdInstructions}${existingSection}
 Email:
 From: ${email.from_name || ''} <${email.from_address}>
 Subject: ${email.subject}
@@ -264,7 +369,8 @@ Return ONLY a JSON object with this shape, no prose, no markdown fences:
       "end_date": "YYYY-MM-DD or null",
       "start_time": "HH:MM or null",
       "end_time": "HH:MM or null",
-      "location": "<location or null>"
+      "location": "<location or null>",
+      "duplicate_of": "<id from the already-on-calendar list if this is the same real-world event, else null>"
     }
   ],
   "action_items": [
@@ -288,17 +394,35 @@ Rules:
 - Extract ALL notable dates as school_events, even if no parent action is needed — e.g. "Donuts with Dads", "last pizza lunch", "Moving Up Mass", graduation, class parties. Use event_type "social" for fun/celebratory events that are worth knowing about but require no action.
 - Always extract dates in absolute YYYY-MM-DD form; "next Friday" must be resolved against today's date
 - If a single email contains multiple events or asks, return them all
+- Still return an event even if it is already on the calendar — set "duplicate_of" to that row's id rather than omitting it, so its details can be refreshed
+- Two entries are the same real-world event when they describe the same happening, even if worded differently ("All-School Mass" = "First All-School Mass") or dated differently (a later email correcting the date). Set "duplicate_of" for those
+- Do NOT set "duplicate_of" for events that merely fall on the same day, or for a recurring event's other occurrences — those are separate rows
+- Only ever use an id that appears verbatim in the already-on-calendar list; never invent one
 - If nothing extractable, return empty arrays for school_events and action_items`;
 
   const parseResp = await anthropic.messages.create({
     model: 'claude-opus-5',
-    max_tokens: 2000,
+    // A newsletter can carry a dozen events and as many action items, and on
+    // Opus 5 adaptive thinking is on by default and draws from this same
+    // budget. At the old 2000 the response was truncated mid-string and the
+    // JSON.parse below failed with an error that pointed nowhere near the
+    // real cause.
+    max_tokens: 16000,
     messages: [{ role: 'user', content: parserPrompt }],
   });
 
+  // Truncation produces invalid JSON, so say what actually happened rather
+  // than letting a syntax error stand in for "the budget was too small".
+  if (parseResp.stop_reason === 'max_tokens') {
+    throw new Error(
+      `Parser hit max_tokens (${parseResp.usage.output_tokens} output tokens) — output truncated.`
+    );
+  }
+
   const textBlock = parseResp.content.find((b) => b.type === 'text') as any;
+  if (!textBlock) throw new Error(`Parser returned no text block (stop_reason: ${parseResp.stop_reason}).`);
   const rawText = textBlock.text.replace(/```json|```/g, '').trim();
-  const parsed = normalizeParsedOutput(JSON.parse(rawText));
+  const parsed = normalizeParsedOutput(JSON.parse(rawText), knownIds);
 
   // 3. Update inbound_emails with parse output
   await supabase
@@ -312,8 +436,29 @@ Rules:
     })
     .eq('id', emailId);
 
-  // 4. Insert school events
+  // 4. Insert school events, merging into an existing row when the parser
+  //    recognised one. See mergeIntoExisting for the newer-wins rules.
+  const existingById = new Map(existing.map((e) => [e.id, e]));
+  const sourceFreshness = await fetchSourceReceivedAt(existing);
+
   for (const evt of parsed.school_events || []) {
+    const target = evt.duplicate_of ? existingById.get(evt.duplicate_of) : null;
+
+    if (target) {
+      const patch = mergeIntoExisting(
+        target,
+        evt,
+        emailId,
+        email.received_at,
+        sourceFreshness.get(target.source_email_id) ?? null
+      );
+      // An email that adds nothing new to a row it matched needs no write.
+      if (Object.keys(patch).length > 0) {
+        await supabase.from('school_calendar').update(patch).eq('id', target.id);
+      }
+      continue;
+    }
+
     await supabase.from('school_calendar').insert({
       household_id: household.id,
       source_email_id: emailId,
