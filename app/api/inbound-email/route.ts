@@ -6,7 +6,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Resend } from 'resend';
 import { timingSafeEqual } from 'crypto';
 import { getHouseholdByInboundAddress, type Household } from '@/lib/household';
-import { extractLinks, fetchNewsletterContent } from '@/lib/newsletter';
+import { extractLinks, fetchNewsletterContent, urlIdentity } from '@/lib/newsletter';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -37,11 +37,21 @@ function escapeHtml(value: unknown): string {
 // Only render a details_url as a clickable link if it's a plain https URL —
 // blocks javascript:/data: URIs the model might otherwise copy verbatim
 // from a malicious email into an <a href>.
-function safeHttpsUrl(value: unknown): string | null {
+//
+// `sourcePages` holds the newsletters we fetched and fed to the parser. Their
+// text carries its own address (Jina prints a "URL Source:" header), so asked
+// for a task's link the model reaches for the page in front of it — "Log 40
+// volunteer hours in MobileServe" came back pointing at app.smore.com. A link
+// to the newsletter you have already read is worse than no link: it looks
+// like the way to do the task and isn't. Dropped rather than stored.
+function safeHttpsUrl(value: unknown, sourcePages: Set<string> = new Set()): string | null {
   if (typeof value !== 'string') return null;
   try {
     const url = new URL(value);
-    return url.protocol === 'https:' ? url.toString() : null;
+    if (url.protocol !== 'https:') return null;
+    const identity = urlIdentity(url.toString());
+    if (identity && sourcePages.has(identity)) return null;
+    return url.toString();
   } catch {
     return null;
   }
@@ -171,7 +181,11 @@ function knownIdOrNull(value: unknown, knownIds: Set<string>): string | null {
   return typeof value === 'string' && knownIds.has(value) ? value : null;
 }
 
-function normalizeParsedOutput(raw: any, knownIds: Set<string> = new Set()) {
+function normalizeParsedOutput(
+  raw: any,
+  knownIds: Set<string> = new Set(),
+  sourcePages: Set<string> = new Set()
+) {
   const school_events = Array.isArray(raw?.school_events)
     ? raw.school_events
         .slice(0, MAX_ITEMS)
@@ -195,7 +209,7 @@ function normalizeParsedOutput(raw: any, knownIds: Set<string> = new Set()) {
     ? raw.action_items.slice(0, MAX_ITEMS).map((a: any) => ({
         title: truncateOrNull(a?.title, 200) || 'Untitled task',
         description: truncateOrNull(a?.description, 1000),
-        details_url: safeHttpsUrl(a?.details_url),
+        details_url: safeHttpsUrl(a?.details_url, sourcePages),
         due_date: dateOrNull(a?.due_date),
         priority: PRIORITIES.has(a?.priority) ? a.priority : 'normal',
         category: truncateOrNull(a?.category, 50),
@@ -304,11 +318,22 @@ async function parseAndProcessEmail(emailId: string, household: any) {
 
   // Fetch linked newsletter content
   const links = extractLinks(email.body_html || '');
-  const linkedContents = await Promise.all(links.map(fetchNewsletterContent));
-  const newsletterSection = linkedContents
-    .map((c, i) => (c ? `\nLinked page ${i + 1} (${links[i]}):\n${c}` : ''))
+  const fetched = await Promise.all(links.map(fetchNewsletterContent));
+
+  // Cite the resolved address in the prompt, not the click-tracking wrapper
+  // the email actually contained — that one means nothing to a reader.
+  const newsletterSection = fetched
+    .map((f, i) => (f.content ? `\nLinked page ${i + 1} (${f.url ?? links[i]}):\n${f.content}` : ''))
     .filter(Boolean)
     .join('\n');
+
+  // Both forms of every page we pulled in: a details_url matching one of
+  // these points back at the newsletter rather than at the task.
+  const sourcePages = new Set(
+    [...links, ...fetched.map((f) => f.url)]
+      .flatMap((u) => (u ? [urlIdentity(u)] : []))
+      .filter((u): u is string => Boolean(u))
+  );
 
   // Build context for the parser
   const today = new Date().toISOString().slice(0, 10);
@@ -377,7 +402,7 @@ Return ONLY a JSON object with this shape, no prose, no markdown fences:
     {
       "title": "<short title, e.g. 'Sign up for Teacher Appreciation Week lunch slot'>",
       "description": "<context>",
-      "details_url": "<signup or info URL if present, else null>",
+      "details_url": "<the URL where this specific task gets DONE — the signup sheet, order form, payment page, or portal. NOT the newsletter or bulletin you are reading this from, and not the school's home page. null if the email does not give one.>",
       "due_date": "YYYY-MM-DD or null",
       "priority": "urgent" | "normal" | "low",
       "category": "volunteer" | "form" | "payment" | "rsvp" | "supply" | "other"
@@ -422,7 +447,7 @@ Rules:
   const textBlock = parseResp.content.find((b) => b.type === 'text') as any;
   if (!textBlock) throw new Error(`Parser returned no text block (stop_reason: ${parseResp.stop_reason}).`);
   const rawText = textBlock.text.replace(/```json|```/g, '').trim();
-  const parsed = normalizeParsedOutput(JSON.parse(rawText), knownIds);
+  const parsed = normalizeParsedOutput(JSON.parse(rawText), knownIds, sourcePages);
 
   // 3. Update inbound_emails with parse output
   await supabase

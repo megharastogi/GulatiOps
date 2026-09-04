@@ -106,23 +106,52 @@ export function extractLinks(html: string): string[] {
     .slice(0, 3);
 }
 
-/** Readable text of the newsletter behind a link, or '' if it can't be had. */
-export async function fetchNewsletterContent(url: string): Promise<string> {
+export type FetchedNewsletter = {
+  /** Where the content actually came from, after the tracking hops. */
+  url: string | null;
+  /** Readable text of the page, or '' if it couldn't be had. */
+  content: string;
+};
+
+/**
+ * The newsletter behind a link, and the URL it turned out to live at.
+ *
+ * The resolved URL is returned rather than discarded because the caller needs
+ * to recognise it later: the parser reads this page and will happily offer
+ * its address as an action item's "details" link, which sends you back to the
+ * newsletter you already read instead of to the form you need to fill in.
+ */
+export async function fetchNewsletterContent(url: string): Promise<FetchedNewsletter> {
   try {
     const resolved = await resolveTrackingUrl(url);
-    if (!resolved) return '';
+    if (!resolved) return { url: null, content: '' };
 
     const target = stripIdentityParams(new URL(resolved));
-    if (!isSafeFetchTarget(target)) return '';
+    if (!isSafeFetchTarget(target)) return { url: null, content: '' };
 
     // Jina Reader renders JS-heavy pages (Smore, Peachjar) to plain text.
     const res = await fetch(`https://r.jina.ai/${target.toString()}`, {
       headers: { Accept: 'text/plain' },
       signal: AbortSignal.timeout(20000),
     });
-    if (!res.ok) return '';
-    return (await res.text()).slice(0, 4000);
+    if (!res.ok) return { url: target.toString(), content: '' };
+    return { url: target.toString(), content: (await res.text()).slice(0, 4000) };
   } catch {
-    return '';
+    return { url: null, content: '' };
+  }
+}
+
+/**
+ * Origin + path, lowercased, no query, no trailing slash — enough to tell
+ * "this is the newsletter again" from "this is the signup form", while
+ * ignoring the utm noise that makes two copies of one link look different.
+ */
+export function urlIdentity(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname.replace(/\/+$/, '');
+    return `${parsed.protocol}//${parsed.hostname.toLowerCase()}${path}`;
+  } catch {
+    return null;
   }
 }
