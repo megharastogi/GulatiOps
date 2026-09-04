@@ -26,7 +26,16 @@ export function formatDayHeading(dateStr: string) {
   };
 }
 
-/** 6:00 PM. The left column of an event, where a task has its checkbox. */
+/** The month/day pair for an event's calendar tile. */
+export function formatDateTile(dateStr: string) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  return {
+    month: d.toLocaleDateString('en-US', { month: 'short' }),
+    day: d.toLocaleDateString('en-US', { day: 'numeric' }),
+  };
+}
+
+/** 6:00 PM. Sits under the tile, in the column where a task has its box. */
 export function formatTime(t: string | null) {
   if (!t) return null;
   const [h, m] = t.split(':').map(Number);
@@ -122,19 +131,29 @@ function Provenance({
 }
 
 /**
- * An event leads with *when*. The time sits in a fixed left column so a run
- * of them can be scanned down the edge without reading a word — and so the
- * same column on a task can hold its checkbox. That shared gutter is what
- * makes the two types tell themselves apart at a glance: one has a time in
- * it, the other has something you can press.
+ * An event leads with *when*: a calendar tile in the same left column where a
+ * task keeps its checkbox. That shared gutter is what makes the two types
+ * tell themselves apart at a glance — one column holds a date, the other
+ * holds something you can press — and it reads with the colour drained out.
  *
- * The date is deliberately absent. These render inside a day group that
- * already states it; repeating it on every row was the noise.
+ * The date is repeated here even though the day heading above already states
+ * it. Strictly that is redundant; in practice the tile is the thing the eye
+ * lands on when scanning, and a heading scrolled just off the top of the
+ * screen isn't much help.
  */
 export function EventCard({ event }: { event: any }) {
+  const { month, day } = formatDateTile(event.start_date);
+  const time = formatTime(event.start_time);
+
   return (
     <div className="card row-card">
-      <div className="gutter gutter-time">{formatTime(event.start_time) ?? 'All day'}</div>
+      <div className="gutter">
+        <div className="datetile">
+          <div className="datetile-m">{month}</div>
+          <div className="datetile-d">{day}</div>
+        </div>
+        <div className="datetile-time">{time ?? 'All day'}</div>
+      </div>
       <div className="grow">
         <div style={{ fontWeight: 600 }}>{event.title}</div>
         {event.location && (
@@ -202,6 +221,8 @@ export function EventDays({ events }: { events: any[] }) {
 export function ActionCard({ item }: { item: any }) {
   const due = dueLabel(item.due_date);
   const details = detailsLink(item.details_url);
+  // 'other' is the parser's fallback, which tells a reader nothing.
+  const category = item.category && item.category !== 'other' ? item.category : null;
 
   return (
     <div className="card row-card">
@@ -215,12 +236,14 @@ export function ActionCard({ item }: { item: any }) {
       </form>
       <div className="grow">
         <div style={{ fontWeight: 600 }}>{item.title}</div>
-        {due && (
+        {(due || category) && (
           <div
-            className={due.urgent ? undefined : 'muted'}
-            style={{ fontSize: 13, color: due.urgent ? 'var(--danger)' : undefined }}
+            className={due?.urgent ? undefined : 'muted'}
+            style={{ fontSize: 13, color: due?.urgent ? 'var(--danger)' : undefined }}
           >
-            {due.text}
+            {due?.text}
+            {due && category ? ' · ' : ''}
+            {category}
           </div>
         )}
         <Provenance

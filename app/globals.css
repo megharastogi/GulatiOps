@@ -328,12 +328,39 @@ input[type='time'] {
   padding-top: 1px;
 }
 
-.gutter-time {
-  font-size: 12px;
+/* The calendar tile. Deliberately the highest-contrast thing in the row
+   after the title: scanning "what day is that" should not require reading. */
+.datetile {
+  width: 46px;
+  margin-left: auto;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 4px 0 5px;
+  text-align: center;
+}
+
+.datetile-m {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  line-height: 1.3;
+}
+
+.datetile-d {
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.datetile-time {
+  margin-top: 4px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
   text-align: right;
-  line-height: 1.5;
 }
 
 /* min-width:0 stops a long unbroken title from pushing the gutter off. */

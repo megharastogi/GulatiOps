@@ -1,16 +1,10 @@
 import { createClient } from '@/lib/supabase/server';
 import { getHousehold } from '@/lib/household';
+import { SOURCE_EMAIL } from '@/lib/digest';
 import { addActionItem } from './actions';
-import { markDone } from '../actions';
+import { ActionCard } from '../cards';
 
 export const dynamic = 'force-dynamic';
-
-function formatDate(dateStr: string) {
-  return new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-  });
-}
 
 export default async function TodoPage() {
   const household = await getHousehold();
@@ -20,7 +14,7 @@ export default async function TodoPage() {
 
   const { data: items } = await supabase
     .from('action_items')
-    .select('*')
+    .select(`*, ${SOURCE_EMAIL}`)
     .eq('household_id', household.id)
     .eq('status', 'open')
     .order('due_date', { ascending: true, nullsFirst: false });
@@ -64,27 +58,7 @@ export default async function TodoPage() {
       {items?.length ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {items.map((item) => (
-            <div
-              key={item.id}
-              className="card"
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}
-            >
-              <div>
-                <div style={{ fontWeight: 600 }}>{item.title}</div>
-                {(item.due_date || item.category) && (
-                  <div className="muted" style={{ fontSize: 13 }}>
-                    {item.due_date ? `Due ${formatDate(item.due_date)}` : null}
-                    {item.due_date && item.category ? ' · ' : null}
-                    {item.category && item.category !== 'other' ? item.category : null}
-                  </div>
-                )}
-              </div>
-              <form action={markDone.bind(null, item.id)}>
-                <button type="submit" className="btn-secondary">
-                  Done
-                </button>
-              </form>
-            </div>
+            <ActionCard key={item.id} item={item} />
           ))}
         </div>
       ) : (
