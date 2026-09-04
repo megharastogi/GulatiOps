@@ -7,6 +7,7 @@
 
 import Link from 'next/link';
 import { type SourceEmail } from '@/lib/digest';
+import { markDone } from './actions';
 
 export function formatDate(dateStr: string) {
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', {
@@ -14,6 +15,24 @@ export function formatDate(dateStr: string) {
     month: 'short',
     day: 'numeric',
   });
+}
+
+/** "Thu · Sep 10", the header a day's events sit under. */
+export function formatDayHeading(dateStr: string) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  return {
+    weekday: d.toLocaleDateString('en-US', { weekday: 'short' }),
+    rest: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+  };
+}
+
+/** 6:00 PM. The left column of an event, where a task has its checkbox. */
+export function formatTime(t: string | null) {
+  if (!t) return null;
+  const [h, m] = t.split(':').map(Number);
+  const ampm = h < 12 ? 'AM' : 'PM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
 export function formatWhen(iso: string) {
@@ -102,60 +121,131 @@ function Provenance({
   );
 }
 
-export function EventCard({ event, showTime }: { event: any; showTime: boolean }) {
+/**
+ * An event leads with *when*. The time sits in a fixed left column so a run
+ * of them can be scanned down the edge without reading a word — and so the
+ * same column on a task can hold its checkbox. That shared gutter is what
+ * makes the two types tell themselves apart at a glance: one has a time in
+ * it, the other has something you can press.
+ *
+ * The date is deliberately absent. These render inside a day group that
+ * already states it; repeating it on every row was the noise.
+ */
+export function EventCard({ event }: { event: any }) {
   return (
-    <div className="card">
-      <div style={{ fontWeight: 600 }}>{event.title}</div>
-      <div className="muted" style={{ fontSize: 13 }}>
-        {formatDate(event.start_date)}
-        {showTime && event.start_time ? ` · ${event.start_time.slice(0, 5)}` : ''}
-        {event.location ? ` · ${event.location}` : ''}
+    <div className="card row-card">
+      <div className="gutter gutter-time">{formatTime(event.start_time) ?? 'All day'}</div>
+      <div className="grow">
+        <div style={{ fontWeight: 600 }}>{event.title}</div>
+        {event.location && (
+          <div className="muted" style={{ fontSize: 13 }}>
+            {event.location}
+          </div>
+        )}
+        <Provenance
+          blurb={event.description || event.source_email?.summary}
+          source={event.source_email}
+        />
       </div>
-      <Provenance
-        blurb={event.description || event.source_email?.summary}
-        source={event.source_email}
-      />
     </div>
   );
 }
 
+/**
+ * Events for one day, under a single heading. Assumes the list is already
+ * ordered by start_date, which every caller's query guarantees.
+ */
+export function EventDays({ events }: { events: any[] }) {
+  const days: [string, any[]][] = [];
+  for (const e of events) {
+    const last = days[days.length - 1];
+    if (last && last[0] === e.start_date) last[1].push(e);
+    else days.push([e.start_date, [e]]);
+  }
+
+  return (
+    <div className="day-groups">
+      {days.map(([date, dayEvents]) => {
+        const { weekday, rest } = formatDayHeading(date);
+        const days_out = daysUntil(date);
+        return (
+          <section key={date}>
+            <div className="day-head">
+              <span className="day-dow">{weekday}</span>
+              <span className="day-rest">{rest}</span>
+              {days_out <= 1 && (
+                <span className="day-now">{days_out === 0 ? 'Today' : 'Tomorrow'}</span>
+              )}
+              <span className="day-line" />
+            </div>
+            <div className="stack-8">
+              {dayEvents.map((e) => (
+                <EventCard key={e.id} event={e} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * A task leads with a checkbox, and the checkbox is the real control — an
+ * empty box that can't be ticked is a lie about what the card does. Marking
+ * done from wherever you are beats navigating to Todo to press a button next
+ * to the same row.
+ *
+ * A plain form post, so it works before hydration and needs no client
+ * component; markDone revalidates all three listing pages.
+ */
 export function ActionCard({ item }: { item: any }) {
   const due = dueLabel(item.due_date);
   const details = detailsLink(item.details_url);
 
   return (
-    <div className="card">
-      <div style={{ fontWeight: 600 }}>{item.title}</div>
-      {due && (
-        <div
-          className={due.urgent ? undefined : 'muted'}
-          style={{ fontSize: 13, color: due.urgent ? 'var(--danger)' : undefined }}
-        >
-          {due.text}
-        </div>
-      )}
-      <Provenance
-        blurb={item.description || item.source_email?.summary}
-        source={item.source_email}
-        action={
-          // Opens away from the dashboard on purpose: in standalone PWA mode a
-          // same-tab navigation to an outside site replaces the app with a
-          // window that has no back button.
-          details && (
-            <div>
-              <a
-                className="btn-secondary details-link"
-                href={details.href}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {DETAILS_LABEL[item.category] ?? 'Open the link'}{' '}
-                <span className="details-host">{details.host} ↗</span>
-              </a>
-            </div>
-          )
-        }
-      />
+    <div className="card row-card">
+      <form className="gutter" action={markDone.bind(null, item.id)}>
+        <button
+          type="submit"
+          className={due?.urgent ? 'checkbox checkbox-urgent' : 'checkbox'}
+          aria-label={`Mark "${item.title}" done`}
+          title="Mark done"
+        />
+      </form>
+      <div className="grow">
+        <div style={{ fontWeight: 600 }}>{item.title}</div>
+        {due && (
+          <div
+            className={due.urgent ? undefined : 'muted'}
+            style={{ fontSize: 13, color: due.urgent ? 'var(--danger)' : undefined }}
+          >
+            {due.text}
+          </div>
+        )}
+        <Provenance
+          blurb={item.description || item.source_email?.summary}
+          source={item.source_email}
+          action={
+            // Opens away from the dashboard on purpose: in standalone PWA mode
+            // a same-tab navigation to an outside site replaces the app with a
+            // window that has no back button.
+            details && (
+              <div>
+                <a
+                  className="btn-secondary details-link"
+                  href={details.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {DETAILS_LABEL[item.category] ?? 'Open the link'}{' '}
+                  <span className="details-host">{details.host} ↗</span>
+                </a>
+              </div>
+            )
+          }
+        />
+      </div>
     </div>
   );
 }

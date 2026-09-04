@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { getHousehold } from '@/lib/household';
 import { getDigest } from '@/lib/digest';
-import { ActionCard, EventCard, daysUntil, formatDate, formatWhen, mailHref } from '../cards';
+import { ActionCard, EventDays, daysUntil, formatDate, formatWhen, mailHref } from '../cards';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
@@ -33,11 +33,7 @@ export default async function WeekPage() {
       <section>
         <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Next 7 days</h3>
         {thisWeek.length ? (
-          <div style={sectionStyle}>
-            {thisWeek.map((e: any) => (
-              <EventCard key={e.id} event={e} showTime />
-            ))}
-          </div>
+          <EventDays events={thisWeek} />
         ) : (
           <p className="muted">Nothing on the school calendar this week.</p>
         )}
@@ -46,11 +42,7 @@ export default async function WeekPage() {
       {later.length > 0 && (
         <section>
           <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>The week after</h3>
-          <div style={sectionStyle}>
-            {later.map((e: any) => (
-              <EventCard key={e.id} event={e} showTime={false} />
-            ))}
-          </div>
+          <EventDays events={later} />
         </section>
       )}
 

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { getHousehold } from '@/lib/household';
-import { markDone, addActionItem } from './actions';
+import { addActionItem } from './actions';
+import { markDone } from '../actions';
 
 export const dynamic = 'force-dynamic';
 

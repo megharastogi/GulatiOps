@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getHousehold, hasFeature } from '@/lib/household';
 import { SOURCE_EMAIL } from '@/lib/digest';
-import { ActionCard, EventCard, daysUntil } from './cards';
+import { ActionCard, EventDays } from './cards';
 
 export const dynamic = 'force-dynamic';
 
@@ -144,11 +144,7 @@ export default async function DashboardHome() {
       <section>
         <h2 style={{ fontSize: 15, marginBottom: 8 }}>Coming up</h2>
         {events?.length ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {events.map((e) => (
-              <EventCard key={e.id} event={e} showTime={daysUntil(e.start_date) <= 7} />
-            ))}
-          </div>
+          <EventDays events={events} />
         ) : (
           <p className="muted">Nothing on the school calendar in the next 2 weeks.</p>
         )}
