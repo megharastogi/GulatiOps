@@ -99,10 +99,18 @@ export async function resolveTrackingUrl(
 }
 
 /** Links worth following out of an email body: no tracking pixels, max 3. */
+// The href regex can't tell an <a> from a <link rel="stylesheet">, so a
+// newsletter that pulls a webfont offered fonts.googleapis.com as one of its
+// three links — handed to Jina to "read", and now offered to a reader as
+// something to click. Anything that is plainly an asset is dropped.
+const ASSET_URL =
+  /\.(css|js|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|eot)($|[?#])|^https?:\/\/fonts\.(googleapis|gstatic)\.com\//i;
+
 export function extractLinks(html: string): string[] {
   const matches = [...html.matchAll(/href=["'](https?:\/\/[^"'\s>]+)["']/gi)];
   return [...new Set(matches.map((m) => m[1].replace(/&amp;/g, '&')))]
     .filter((url) => !/(unsubscribe|optout|pixel|beacon|open\.php|mailto)/i.test(url))
+    .filter((url) => !ASSET_URL.test(url))
     .slice(0, 3);
 }
 
@@ -173,4 +181,58 @@ export function urlIdentity(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The links in an email, ready to render — the newsletter behind a stub is
+ * usually the whole point of the mail, and reading it shouldn't require
+ * opening the parser's summary and guessing.
+ *
+ * The href stays the original: a click-tracking wrapper redirects fine in a
+ * browser, and resolving it here would mean a network round trip per email.
+ * Only the *label* is improved. These wrappers carry their destination as a
+ * path segment —
+ *
+ *   https://mandrillapp.com/track/click/30193320/app.smore.com?p=...
+ *
+ * — so the last segment that looks like a hostname is a better answer to
+ * "where does this go" than the wrapper's own host. A heuristic, and a safe
+ * one: it only ever changes what is displayed.
+ */
+export function newsletterLinks(html: string): { href: string; label: string }[] {
+  const out: { href: string; label: string }[] = [];
+
+  for (const raw of extractLinks(html)) {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      continue;
+    }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') continue;
+
+    const hinted = url.pathname
+      .split('/')
+      .filter((seg) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(seg) && /\.[a-z]{2,}$/i.test(seg))
+      .pop();
+
+    out.push({
+      href: url.toString(),
+      label: (hinted ?? url.hostname).replace(/^www\./, ''),
+    });
+  }
+
+  // Opaque wrappers from one sender all reduce to the same host, and three
+  // buttons reading "tracking.teamsideline.com" give a reader no way to pick.
+  const seen = new Map<string, number>();
+  for (const link of out) seen.set(link.label, (seen.get(link.label) ?? 0) + 1);
+  const used = new Map<string, number>();
+  for (const link of out) {
+    if ((seen.get(link.label) ?? 0) < 2) continue;
+    const n = (used.get(link.label) ?? 0) + 1;
+    used.set(link.label, n);
+    link.label = `${link.label} (${n})`;
+  }
+
+  return out;
 }

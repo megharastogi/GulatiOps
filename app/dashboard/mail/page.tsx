@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { getHousehold } from '@/lib/household';
+import { newsletterLinks } from '@/lib/newsletter';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +34,7 @@ export default async function MailPage({
   const supabase = await createClient();
 
   const COLUMNS =
-    'id, from_name, from_address, subject, summary, classification, source_name, received_at, parsed_at, parse_error, body_text';
+    'id, from_name, from_address, subject, summary, classification, source_name, received_at, parsed_at, parse_error, body_text, body_html';
 
   const { data } = await supabase
     .from('inbound_emails')
@@ -98,6 +99,30 @@ export default async function MailPage({
                   Couldn&apos;t parse this one. The original is still below.
                 </p>
               )}
+
+              {/* School platforms send a stub whose whole content is "this
+                  week's newsletter is out" plus a link. The parser follows it;
+                  until now a reader couldn't. Opens in a new tab so the PWA
+                  isn't replaced by a page with no way back. */}
+              {(() => {
+                const links = newsletterLinks(e.body_html || '');
+                if (!links.length) return null;
+                return (
+                  <div className="mail-links">
+                    {links.map((l) => (
+                      <a
+                        key={l.href}
+                        className="btn-secondary details-link"
+                        href={l.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Read <span className="details-host">{l.label} ↗</span>
+                      </a>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {/* body_text only, never body_html — this is forwarded mail from
                   outside, and rendering its HTML here would run whatever it

@@ -589,3 +589,11 @@ input[type='time'] {
     border-color: var(--accent);
   }
 }
+
+/* Links pulled out of an email, above its plain-text body. */
+.mail-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
