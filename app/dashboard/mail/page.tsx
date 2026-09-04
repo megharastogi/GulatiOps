@@ -117,7 +117,7 @@ export default async function MailPage({
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        Read <span className="details-host">{l.label} ↗</span>
+                        {l.label} <span className="details-host">{l.host} ↗</span>
                       </a>
                     ))}
                   </div>

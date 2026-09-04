@@ -183,15 +183,81 @@ export function urlIdentity(url: string): string | null {
   }
 }
 
+// Enough of HTML's named entities to cover what senders actually put in link
+// text. The arrows matter more than they look: an undecoded &rarr; survives
+// the trailing-punctuation trim as literal text and ends up in the label.
+const ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  mdash: '—', ndash: '–', hellip: '…',
+  rsquo: '\u2019', lsquo: '\u2018', rdquo: '\u201d', ldquo: '\u201c',
+  rarr: '→', larr: '←', raquo: '»', laquo: '«', bull: '•', middot: '·',
+  trade: '™', reg: '®', copy: '©', deg: '°', times: '×',
+};
+
+/** Anchor text arrives as markup fragments; this is what makes it a label. */
+function textOf(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+    .replace(/&([a-z]+);/gi, (m, name) => ENTITIES[name.toLowerCase()] ?? m)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// "here", "click here", a bare URL: technically anchor text, no use as a
+// label. Anchored at both ends on purpose — an earlier version tested the
+// prefix and threw away "View this week's newsletter" for starting with
+// "view", which is precisely the label worth keeping.
+const USELESS_LABEL =
+  /^(here|link|this|more|view|open|click|read( more| here)?|click (here|to view)|view (here|more)|learn more|details)$/i;
+
+function isUsefulLabel(text: string): boolean {
+  const bare = text.replace(/[\s.:,!>»\u2192\u203a-]+$/u, '');
+  return (
+    bare.length >= 4 &&
+    bare.length <= 80 &&
+    !USELESS_LABEL.test(bare) &&
+    !/^https?:/i.test(bare)
+  );
+}
+
+/**
+ * Anchor text keyed by href. An <a> can wrap an image and appear twice for one
+ * destination, so the longest usable text wins rather than the first.
+ */
+function anchorLabels(html: string): Map<string, string> {
+  const labels = new Map<string, string>();
+  const anchors = html.matchAll(/<a\b[^>]*href=["'](https?:\/\/[^"'\s>]+)["'][^>]*>([\s\S]*?)<\/a>/gi);
+
+  for (const m of anchors) {
+    const href = m[1].replace(/&amp;/g, '&');
+    const text = textOf(m[2]).replace(/[\s.:,!>»\u2192\u203a-]+$/u, '');
+    if (!isUsefulLabel(text)) continue;
+    const current = labels.get(href);
+    if (!current || text.length > current.length) labels.set(href, text);
+  }
+
+  return labels;
+}
+
 /**
  * The links in an email, ready to render — the newsletter behind a stub is
  * usually the whole point of the mail, and reading it shouldn't require
  * opening the parser's summary and guessing.
  *
+ * The label is the link's own anchor text, which is what the sender wrote and
+ * what a reader would have seen in their mail client. Where that is missing or
+ * says nothing ("here", a bare URL) it falls back to "Read".
+ *
+ * `host` is shown alongside regardless, and is the security-relevant half: it
+ * is the one part a sender doesn't get to phrase. Anchor text saying "the
+ * district calendar" over a link to somewhere else is exactly the trick that
+ * makes showing the destination worth the space.
+ *
  * The href stays the original: a click-tracking wrapper redirects fine in a
  * browser, and resolving it here would mean a network round trip per email.
- * Only the *label* is improved. These wrappers carry their destination as a
- * path segment —
+ * Those wrappers carry their destination as a path segment —
  *
  *   https://mandrillapp.com/track/click/30193320/app.smore.com?p=...
  *
@@ -199,8 +265,9 @@ export function urlIdentity(url: string): string | null {
  * "where does this go" than the wrapper's own host. A heuristic, and a safe
  * one: it only ever changes what is displayed.
  */
-export function newsletterLinks(html: string): { href: string; label: string }[] {
-  const out: { href: string; label: string }[] = [];
+export function newsletterLinks(html: string): { href: string; label: string; host: string }[] {
+  const labels = anchorLabels(html);
+  const out: { href: string; label: string; host: string }[] = [];
 
   for (const raw of extractLinks(html)) {
     let url: URL;
@@ -218,19 +285,22 @@ export function newsletterLinks(html: string): { href: string; label: string }[]
 
     out.push({
       href: url.toString(),
-      label: (hinted ?? url.hostname).replace(/^www\./, ''),
+      label: labels.get(raw) ?? 'Read',
+      host: (hinted ?? url.hostname).replace(/^www\./, ''),
     });
   }
 
-  // Opaque wrappers from one sender all reduce to the same host, and three
-  // buttons reading "tracking.teamsideline.com" give a reader no way to pick.
+  // Two buttons reading "Read" over the same host give a reader no way to
+  // pick. Only ever disambiguates rows that are genuinely indistinguishable.
+  const key = (l: { label: string; host: string }) => `${l.label}|${l.host}`;
   const seen = new Map<string, number>();
-  for (const link of out) seen.set(link.label, (seen.get(link.label) ?? 0) + 1);
+  for (const link of out) seen.set(key(link), (seen.get(key(link)) ?? 0) + 1);
   const used = new Map<string, number>();
   for (const link of out) {
-    if ((seen.get(link.label) ?? 0) < 2) continue;
-    const n = (used.get(link.label) ?? 0) + 1;
-    used.set(link.label, n);
+    const k = key(link);
+    if ((seen.get(k) ?? 0) < 2) continue;
+    const n = (used.get(k) ?? 0) + 1;
+    used.set(k, n);
     link.label = `${link.label} (${n})`;
   }
 
