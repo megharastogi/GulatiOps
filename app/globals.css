@@ -251,3 +251,61 @@ input[type='time'] {
   flex-direction: column;
   gap: 2px;
 }
+
+/* ---- Provenance: the email a card was parsed out of ---- */
+
+/* Two lines of the parser's summary. Clamped rather than truncated in the
+   query, because the full text is worth having in the DOM for search. */
+.blurb {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.source-link {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.source-link:hover {
+  text-decoration: underline;
+}
+
+/* A whole card that is itself a link. */
+.card-link {
+  display: block;
+  text-decoration: none;
+}
+
+/* The email /dashboard/week linked to. Highlighted so it's obvious which one
+   opened after landing part-way down the list. */
+.card--linked {
+  border-color: var(--accent);
+}
+
+/* Keeps the anchored card clear of the top edge when the hash scrolls to it. */
+[id^='email-'] {
+  scroll-margin-top: 12px;
+}
+
+/* The signup or form link an action item points at, sitting between the
+   blurb and the source line. Bordered rather than plain accent text: it
+   leaves the app, so it should read as a button, not as more prose. */
+.details-link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.details-host {
+  color: var(--text-muted);
+}

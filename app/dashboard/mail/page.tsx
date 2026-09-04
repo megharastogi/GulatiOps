@@ -18,18 +18,45 @@ const CLASSIFICATION_LABEL: Record<string, string> = {
   noise: 'Noise',
 };
 
-export default async function MailPage() {
+/**
+ * `?open=<id>` comes from a card on /dashboard/week: land on this page with
+ * that email already expanded and scrolled to, rather than on a list of fifty
+ * subjects with no indication which one was meant.
+ */
+export default async function MailPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ open?: string }>;
+}) {
+  const { open: openId } = await searchParams;
   const household = await getHousehold();
   const supabase = await createClient();
 
-  const { data: emails } = await supabase
+  const COLUMNS =
+    'id, from_name, from_address, subject, summary, classification, source_name, received_at, parsed_at, parse_error, body_text';
+
+  const { data } = await supabase
     .from('inbound_emails')
-    .select(
-      'id, from_name, from_address, subject, summary, classification, source_name, received_at, parsed_at, parse_error, body_text'
-    )
+    .select(COLUMNS)
     .eq('household_id', household.id)
     .order('received_at', { ascending: false })
     .limit(50);
+
+  const emails = data ?? [];
+
+  // The list stops at 50, but an event on /dashboard/week can cite an email
+  // older than that — a June newsletter announcing a September date. Fetch the
+  // linked one on its own and put it at the top, rather than sending the
+  // browser to an anchor that isn't on the page.
+  if (openId && !emails.some((e) => e.id === openId)) {
+    const { data: linked } = await supabase
+      .from('inbound_emails')
+      .select(COLUMNS)
+      .eq('household_id', household.id)
+      .eq('id', openId)
+      .maybeSingle();
+    if (linked) emails.unshift(linked);
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -41,10 +68,15 @@ export default async function MailPage() {
         </p>
       </div>
 
-      {emails?.length ? (
+      {emails.length ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {emails.map((e) => (
-            <details key={e.id} className="card">
+            <details
+              key={e.id}
+              id={`email-${e.id}`}
+              className={e.id === openId ? 'card card--linked' : 'card'}
+              open={e.id === openId}
+            >
               <summary style={{ cursor: 'pointer', listStyle: 'none' }}>
                 <div style={{ fontWeight: 600 }}>{e.subject || '(no subject)'}</div>
                 <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>

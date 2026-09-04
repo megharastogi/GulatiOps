@@ -11,6 +11,27 @@ type QueryClient = {
   from: (table: string) => any;
 };
 
+/**
+ * The email an event or action item was parsed out of. Without it a row is a
+ * bare assertion — "Early dismissal Thursday" with nothing behind it to
+ * check — so both the digest and the week page carry the provenance along.
+ * Null for anything entered by hand through the todo form or the MCP.
+ *
+ * The `!source_email_id` hint names the foreign key column rather than
+ * leaving PostgREST to infer which relationship is meant.
+ */
+export type SourceEmail = {
+  id: string;
+  subject: string | null;
+  source_name: string | null;
+  from_name: string | null;
+  received_at: string;
+  summary: string | null;
+};
+
+const SOURCE_EMAIL =
+  'source_email:inbound_emails!source_email_id (id, subject, source_name, from_name, received_at, summary)';
+
 export type Digest = {
   as_of: string;
   school_events_next_two_weeks: any[];
@@ -32,20 +53,20 @@ export async function getDigest(
   const [events, actions, emails] = await Promise.all([
     supabase
       .from('school_calendar')
-      .select('*')
+      .select(`*, ${SOURCE_EMAIL}`)
       .eq('household_id', householdId)
       .gte('start_date', todayStr)
       .lte('start_date', twoWeeksStr)
       .order('start_date'),
     supabase
       .from('action_items')
-      .select('*')
+      .select(`*, ${SOURCE_EMAIL}`)
       .eq('household_id', householdId)
       .eq('status', 'open')
       .order('due_date', { ascending: true, nullsFirst: false }),
     supabase
       .from('inbound_emails')
-      .select('from_name, source_name, subject, summary, classification, received_at')
+      .select('id, from_name, source_name, subject, summary, classification, received_at')
       .eq('household_id', householdId)
       .gte('received_at', new Date(Date.now() - 7 * 86400_000).toISOString())
       .neq('classification', 'noise')
