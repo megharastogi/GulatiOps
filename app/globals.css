@@ -112,7 +112,9 @@ input[type='time'] {
   border: none;
   color: var(--text-muted);
   font-size: 14px;
-  padding: 4px;
+  /* 8px vertical keeps Setup / Sign out a reachable target in the header. */
+  padding: 8px 6px;
+  text-decoration: none;
 }
 
 /* ---- Trip hourly grid ---- */
@@ -370,6 +372,7 @@ input[type='time'] {
 }
 
 .checkbox {
+  position: relative;
   display: block;
   margin-left: auto;
   width: 20px;
@@ -378,6 +381,15 @@ input[type='time'] {
   border: 2px solid var(--text-muted);
   background: transparent;
   padding: 0;
+}
+
+/* A 20px box is the right size to look at and the wrong size to hit with a
+   thumb. This grows the touch target to 44px without moving the box or
+   changing the row's height. */
+.checkbox::after {
+  content: '';
+  position: absolute;
+  inset: -12px;
 }
 
 .checkbox:hover {
@@ -435,4 +447,145 @@ input[type='time'] {
   flex: 1;
   border-bottom: 1px solid var(--border);
   transform: translateY(-3px);
+}
+
+/* ---- App shell and tab bar ----------------------------------------------
+   Phone first. The tabs are a fixed bottom bar, which is where a thumb
+   already is and which survives the URL bar sliding in and out; the top of a
+   standalone PWA is occupied by the notch. On a wide screen the same markup
+   becomes a row of pills under the header, aligned with the content column
+   rather than pinned to the far left. */
+
+.app-shell {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: calc(12px + env(safe-area-inset-top)) 16px 8px;
+}
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 8px 16px 16px;
+  /* Clear the fixed bar, plus the home indicator underneath it. */
+  padding-bottom: calc(76px + env(safe-area-inset-bottom));
+}
+
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tab {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  /* 52 + the 8px of padding is comfortably past a 44px touch target. */
+  min-height: 52px;
+  padding: 7px 2px 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-muted);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tab svg {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+
+.tab-active {
+  color: var(--accent);
+}
+
+/* Long words in parser output (URLs, run-together school names) would
+   otherwise push a card wider than the screen. */
+.blurb,
+.details-link,
+.source-link {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 380px) {
+  /* Leaves the title a usable column on the smallest phones still around. */
+  .gutter {
+    flex-basis: 50px;
+  }
+
+  .datetile {
+    width: 42px;
+  }
+}
+
+@media (min-width: 768px) {
+  .app-main {
+    order: 3;
+    padding-bottom: 24px;
+  }
+
+  /* Header, then tabs, then content — the bar is markup-last so a screen
+     reader on a phone meets the page before the navigation. */
+  .app-header {
+    order: 1;
+  }
+
+  .tabbar {
+    position: static;
+    width: 100%;
+    max-width: 640px;
+    margin: 0 auto;
+    order: 2;
+    gap: 8px;
+    padding: 0 16px 12px;
+    background: transparent;
+    border-top: 0;
+  }
+
+  .tab {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 7px;
+    min-height: 0;
+    padding: 8px 12px;
+    font-size: 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+  }
+
+  .tab svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .tab-active {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
 }

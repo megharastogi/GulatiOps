@@ -21,6 +21,9 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
+  // Lets the page paint under the notch and home indicator, which is what
+  // makes env(safe-area-inset-*) return anything but 0 in standalone mode.
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
