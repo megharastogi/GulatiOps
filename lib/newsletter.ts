@@ -142,6 +142,25 @@ export async function fetchNewsletterContent(url: string): Promise<FetchedNewsle
 }
 
 /**
+ * Hosts that exist to publish bulletins. A page here is something a family
+ * *reads*; it is never where a form gets filled in or a fee gets paid, so it
+ * is never the right answer to "where does this task get done".
+ *
+ * Deliberately excludes school portals (Alma, FinalSite, TeamSideline) even
+ * though those also send stub email: a portal page is a plausible
+ * destination, and dropping one costs more than a wrong link does.
+ */
+const BULLETIN_HOSTS = /(^|\.)(smore\.com|peachjar\.com)$/i;
+
+export function isBulletinUrl(url: string): boolean {
+  try {
+    return BULLETIN_HOSTS.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Origin + path, lowercased, no query, no trailing slash — enough to tell
  * "this is the newsletter again" from "this is the signup form", while
  * ignoring the utm noise that makes two copies of one link look different.

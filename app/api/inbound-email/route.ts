@@ -6,7 +6,12 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Resend } from 'resend';
 import { timingSafeEqual } from 'crypto';
 import { getHouseholdByInboundAddress, type Household } from '@/lib/household';
-import { extractLinks, fetchNewsletterContent, urlIdentity } from '@/lib/newsletter';
+import {
+  extractLinks,
+  fetchNewsletterContent,
+  isBulletinUrl,
+  urlIdentity,
+} from '@/lib/newsletter';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -38,19 +43,25 @@ function escapeHtml(value: unknown): string {
 // blocks javascript:/data: URIs the model might otherwise copy verbatim
 // from a malicious email into an <a href>.
 //
-// `sourcePages` holds the newsletters we fetched and fed to the parser. Their
+// `sourcePages` holds the pages we fetched and pasted into the prompt. Their
 // text carries its own address (Jina prints a "URL Source:" header), so asked
 // for a task's link the model reaches for the page in front of it — "Log 40
-// volunteer hours in MobileServe" came back pointing at app.smore.com. A link
-// to the newsletter you have already read is worse than no link: it looks
-// like the way to do the task and isn't. Dropped rather than stored.
+// volunteer hours in MobileServe" came back pointing at app.smore.com.
+//
+// Being a source page is not on its own disqualifying, and an earlier version
+// of this check got that wrong: plenty of tasks are legitimately done at a
+// page the email linked and we read. "Review the welcome letter" should point
+// at the letter. So both conditions have to hold — it was in front of the
+// model, *and* it is a bulletin host, where nothing can be submitted. That
+// asymmetry is deliberate: a wrong link is visible (the week view renders the
+// host beside the label) while a link silently dropped is not.
 function safeHttpsUrl(value: unknown, sourcePages: Set<string> = new Set()): string | null {
   if (typeof value !== 'string') return null;
   try {
     const url = new URL(value);
     if (url.protocol !== 'https:') return null;
     const identity = urlIdentity(url.toString());
-    if (identity && sourcePages.has(identity)) return null;
+    if (identity && sourcePages.has(identity) && isBulletinUrl(url.toString())) return null;
     return url.toString();
   } catch {
     return null;
@@ -327,8 +338,7 @@ async function parseAndProcessEmail(emailId: string, household: any) {
     .filter(Boolean)
     .join('\n');
 
-  // Both forms of every page we pulled in: a details_url matching one of
-  // these points back at the newsletter rather than at the task.
+  // Both forms of every page we pulled in, for the bulletin check above.
   const sourcePages = new Set(
     [...links, ...fetched.map((f) => f.url)]
       .flatMap((u) => (u ? [urlIdentity(u)] : []))
