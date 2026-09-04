@@ -39,6 +39,41 @@ export type Digest = {
   emails_past_week: any[];
 };
 
+/**
+ * An item whose email never stated a deadline is not infinitely far away —
+ * it arrived in a school email a few days ago and probably wants doing. But
+ * `nulls last` filed it behind a task due in May 2027, and `nulls first`
+ * would rank it above something genuinely due tomorrow.
+ *
+ * So an undated item sorts as though it were due at the end of the two-week
+ * horizon this app already uses everywhere else: late enough not to outrank
+ * a real deadline this week, early enough not to be buried under next
+ * spring. Priority breaks a tie, then newest first, since a task from this
+ * week's mail is more likely live than one from June.
+ */
+const UNDATED_HORIZON_DAYS = 14;
+
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1, low: 2 };
+
+export function sortActionItems<T extends Record<string, any>>(items: T[]): T[] {
+  const horizon = new Date();
+  horizon.setDate(horizon.getDate() + UNDATED_HORIZON_DAYS);
+  const horizonStr = horizon.toISOString().slice(0, 10);
+
+  // ISO dates compare correctly as plain strings, so no parsing per item.
+  return [...items].sort((a, b) => {
+    const da = a.due_date || horizonStr;
+    const db = b.due_date || horizonStr;
+    if (da !== db) return da < db ? -1 : 1;
+
+    const pa = PRIORITY_RANK[a.priority] ?? 1;
+    const pb = PRIORITY_RANK[b.priority] ?? 1;
+    if (pa !== pb) return pa - pb;
+
+    return String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''));
+  });
+}
+
 export async function getDigest(
   supabase: QueryClient,
   householdId: string
@@ -76,7 +111,7 @@ export async function getDigest(
   return {
     as_of: todayStr,
     school_events_next_two_weeks: events.data || [],
-    open_action_items: actions.data || [],
+    open_action_items: sortActionItems(actions.data || []),
     emails_past_week: emails.data || [],
   };
 }

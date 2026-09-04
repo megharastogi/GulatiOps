@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { getHousehold } from '@/lib/household';
-import { SOURCE_EMAIL } from '@/lib/digest';
+import { SOURCE_EMAIL, sortActionItems } from '@/lib/digest';
 import { addActionItem } from './actions';
 import { ActionCard } from '../cards';
 
@@ -12,12 +12,14 @@ export default async function TodoPage() {
   // relying on the .eq('household_id') filter below being remembered.
   const supabase = await createClient();
 
-  const { data: items } = await supabase
+  const { data } = await supabase
     .from('action_items')
     .select(`*, ${SOURCE_EMAIL}`)
     .eq('household_id', household.id)
     .eq('status', 'open')
     .order('due_date', { ascending: true, nullsFirst: false });
+
+  const items = sortActionItems(data || []);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -55,7 +57,7 @@ export default async function TodoPage() {
         </button>
       </form>
 
-      {items?.length ? (
+      {items.length ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {items.map((item) => (
             <ActionCard key={item.id} item={item} />

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getHousehold, hasFeature } from '@/lib/household';
-import { SOURCE_EMAIL } from '@/lib/digest';
+import { SOURCE_EMAIL, sortActionItems } from '@/lib/digest';
 import { ActionCard, EventDays } from './cards';
 
 export const dynamic = 'force-dynamic';
@@ -34,13 +34,15 @@ export default async function DashboardHome() {
       .gte('start_date', today)
       .lte('start_date', twoWeeksStr)
       .order('start_date', { ascending: true }),
+    // No .limit() here any more: the five that matter can only be chosen
+    // after sortActionItems has run, and LIMIT in SQL was picking a different
+    // five by a different rule.
     supabase
       .from('action_items')
       .select(`*, ${SOURCE_EMAIL}`)
       .eq('household_id', household.id)
       .eq('status', 'open')
-      .order('due_date', { ascending: true, nullsFirst: false })
-      .limit(5),
+      .order('due_date', { ascending: true, nullsFirst: false }),
     supabase
       .from('trips')
       .select('*')
@@ -48,6 +50,8 @@ export default async function DashboardHome() {
       .lte('start_date', today)
       .gte('end_date', today),
   ]);
+
+  const topActionItems = sortActionItems(actionItems || []).slice(0, 5);
 
   const activeTrip = hasFeature(household, 'trips') ? (activeTrips?.[0] ?? null) : null;
 
@@ -164,9 +168,9 @@ export default async function DashboardHome() {
             View all
           </Link>
         </div>
-        {actionItems?.length ? (
+        {topActionItems.length ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {actionItems.map((a) => (
+            {topActionItems.map((a) => (
               <ActionCard key={a.id} item={a} />
             ))}
           </div>

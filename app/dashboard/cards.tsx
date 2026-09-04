@@ -57,7 +57,10 @@ export function daysUntil(dateStr: string) {
 
 /** Overdue and today read differently from "next week sometime". */
 function dueLabel(dueDate: string | null) {
-  if (!dueDate) return null;
+  // Said out loud rather than left blank: an undated item sorts as though it
+  // were due in a fortnight, and a blank line makes that placement look
+  // arbitrary instead of deliberate.
+  if (!dueDate) return { text: 'No due date', urgent: false };
   const days = daysUntil(dueDate);
   if (days < 0) return { text: `Overdue — was ${formatDate(dueDate)}`, urgent: true };
   if (days === 0) return { text: 'Due today', urgent: true };
