@@ -194,9 +194,16 @@ function knownIdOrNull(value: unknown, knownIds: Set<string>): string | null {
 
 function normalizeParsedOutput(
   raw: any,
-  knownIds: Set<string> = new Set(),
-  sourcePages: Set<string> = new Set()
+  opts: {
+    knownEventIds?: Set<string>;
+    knownActionIds?: Set<string>;
+    sourcePages?: Set<string>;
+  } = {}
 ) {
+  const knownEventIds = opts.knownEventIds ?? new Set<string>();
+  const knownActionIds = opts.knownActionIds ?? new Set<string>();
+  const sourcePages = opts.sourcePages ?? new Set<string>();
+
   const school_events = Array.isArray(raw?.school_events)
     ? raw.school_events
         .slice(0, MAX_ITEMS)
@@ -209,7 +216,7 @@ function normalizeParsedOutput(
           start_time: timeOrNull(e?.start_time),
           end_time: timeOrNull(e?.end_time),
           location: truncateOrNull(e?.location, 200),
-          duplicate_of: knownIdOrNull(e?.duplicate_of, knownIds),
+          duplicate_of: knownIdOrNull(e?.duplicate_of, knownEventIds),
         }))
         // An event with no valid date isn't useful on a calendar and
         // shouldn't be stored — better to drop it than show "undefined".
@@ -224,6 +231,7 @@ function normalizeParsedOutput(
         due_date: dateOrNull(a?.due_date),
         priority: PRIORITIES.has(a?.priority) ? a.priority : 'normal',
         category: truncateOrNull(a?.category, 50),
+        duplicate_of: knownIdOrNull(a?.duplicate_of, knownActionIds),
       }))
     : [];
 
@@ -255,6 +263,25 @@ async function fetchExistingEvents(householdId: string) {
   return data || [];
 }
 
+// The household's open to-do list, for the same reason the calendar is passed
+// in: a Friday newsletter restating Wednesday's ask should land on the row
+// that already exists rather than beside it.
+//
+// Deliberately only OPEN items. Matching against completed ones would stop the
+// next newsletter resurrecting a task you finished, but it would also silently
+// swallow anything genuinely recurring — the weekly pizza order is a real task
+// each week, not an echo of last week's.
+async function fetchExistingActionItems(householdId: string) {
+  const { data } = await supabase
+    .from('action_items')
+    .select('id, title, due_date, category, details_url, description, priority, source_email_id')
+    .eq('household_id', householdId)
+    .eq('status', 'open')
+    .order('due_date', { ascending: true, nullsFirst: false })
+    .limit(150);
+  return data || [];
+}
+
 // When each existing row's source email landed. Used to tell a genuinely
 // newer announcement from an old one arriving late.
 async function fetchSourceReceivedAt(existing: any[]): Promise<Map<string, string>> {
@@ -267,9 +294,13 @@ async function fetchSourceReceivedAt(existing: any[]): Promise<Map<string, strin
   return new Map((data || []).map((e: any) => [e.id, e.received_at]));
 }
 
-const MERGEABLE_FIELDS = [
+const MERGEABLE_EVENT_FIELDS = [
   'event_type', 'title', 'description',
   'start_date', 'end_date', 'start_time', 'end_time', 'location',
+] as const;
+
+const MERGEABLE_ACTION_FIELDS = [
+  'title', 'description', 'details_url', 'due_date', 'priority', 'category',
 ] as const;
 
 // Fold a freshly-parsed event into the row it duplicates, and return only the
@@ -292,7 +323,8 @@ function mergeIntoExisting(
   evt: any,
   emailId: string,
   emailReceivedAt: string | null,
-  existingSourceReceivedAt: string | null
+  existingSourceReceivedAt: string | null,
+  fields: readonly string[] = MERGEABLE_EVENT_FIELDS
 ): Record<string, any> {
   // Unknown provenance (the source email was deleted) is treated as
   // not-newer — without evidence this email is fresher, only fill gaps.
@@ -302,7 +334,7 @@ function mergeIntoExisting(
     emailReceivedAt >= existingSourceReceivedAt;
 
   const patch: Record<string, any> = {};
-  for (const field of MERGEABLE_FIELDS) {
+  for (const field of fields) {
     const incoming = evt[field];
     if (incoming === null || incoming === undefined) continue;
     if (incoming === existingRow[field]) continue;
@@ -369,10 +401,18 @@ async function parseAndProcessEmail(emailId: string, household: any) {
   // second one. Only this household's rows are fetched, which is also what
   // makes the id whitelist in normalizeParsedOutput airtight.
   const existing = await fetchExistingEvents(household.id);
-  const knownIds = new Set(existing.map((e) => e.id));
+  const knownEventIds = new Set(existing.map((e) => e.id));
   const existingSection = existing.length
     ? `\nAlready on this family's calendar (do NOT add these again — reference them by id instead):\n${existing
         .map((e) => `- id=${e.id} | ${e.start_date} | ${e.event_type} | ${e.title}`)
+        .join('\n')}\n`
+    : '';
+
+  const existingActions = await fetchExistingActionItems(household.id);
+  const knownActionIds = new Set(existingActions.map((a) => a.id));
+  const existingActionSection = existingActions.length
+    ? `\nAlready on this family's to-do list (do NOT add these again — reference them by id instead):\n${existingActions
+        .map((a) => `- id=${a.id} | due ${a.due_date ?? 'unspecified'} | ${a.title}`)
         .join('\n')}\n`
     : '';
 
@@ -381,7 +421,7 @@ async function parseAndProcessEmail(emailId: string, household: any) {
 
 Today's date: ${today}
 Household members: ${JSON.stringify(householdMembers.data)}
-${householdInstructions}${existingSection}
+${householdInstructions}${existingSection}${existingActionSection}
 Email:
 From: ${email.from_name || ''} <${email.from_address}>
 Subject: ${email.subject}
@@ -415,7 +455,8 @@ Return ONLY a JSON object with this shape, no prose, no markdown fences:
       "details_url": "<the URL where this specific task gets DONE — the signup sheet, order form, payment page, or portal. NOT the newsletter or bulletin you are reading this from, and not the school's home page. null if the email does not give one.>",
       "due_date": "YYYY-MM-DD or null",
       "priority": "urgent" | "normal" | "low",
-      "category": "volunteer" | "form" | "payment" | "rsvp" | "supply" | "other"
+      "category": "volunteer" | "form" | "payment" | "rsvp" | "supply" | "other",
+      "duplicate_of": "<id from the already-on-the-to-do-list section above if this is the same real-world task — a reminder or restatement of something already tracked — else null. Same task worded differently still counts. A task that genuinely recurs (this week's order, this month's shift) is NOT a duplicate of last time's.>"
     }
   ]
 }
@@ -457,7 +498,11 @@ Rules:
   const textBlock = parseResp.content.find((b) => b.type === 'text') as any;
   if (!textBlock) throw new Error(`Parser returned no text block (stop_reason: ${parseResp.stop_reason}).`);
   const rawText = textBlock.text.replace(/```json|```/g, '').trim();
-  const parsed = normalizeParsedOutput(JSON.parse(rawText), knownIds, sourcePages);
+  const parsed = normalizeParsedOutput(JSON.parse(rawText), {
+    knownEventIds,
+    knownActionIds,
+    sourcePages,
+  });
 
   // 3. Update inbound_emails with parse output
   await supabase
@@ -485,7 +530,8 @@ Rules:
         evt,
         emailId,
         email.received_at,
-        sourceFreshness.get(target.source_email_id) ?? null
+        sourceFreshness.get(target.source_email_id) ?? null,
+        MERGEABLE_EVENT_FIELDS
       );
       // An email that adds nothing new to a row it matched needs no write.
       if (Object.keys(patch).length > 0) {
@@ -508,8 +554,30 @@ Rules:
     });
   }
 
-  // 5. Insert action items
+  // 5. Insert action items, folding into the open row this restates when the
+  //    parser recognised one. Three copies of "complete the back-to-school
+  //    forms" is one job and three checkboxes.
+  const existingActionById = new Map(existingActions.map((a) => [a.id, a]));
+  const actionFreshness = await fetchSourceReceivedAt(existingActions);
+
   for (const item of parsed.action_items || []) {
+    const target = item.duplicate_of ? existingActionById.get(item.duplicate_of) : null;
+
+    if (target) {
+      const patch = mergeIntoExisting(
+        target,
+        item,
+        emailId,
+        email.received_at,
+        actionFreshness.get(target.source_email_id) ?? null,
+        MERGEABLE_ACTION_FIELDS
+      );
+      if (Object.keys(patch).length > 0) {
+        await supabase.from('action_items').update(patch).eq('id', target.id);
+      }
+      continue;
+    }
+
     await supabase.from('action_items').insert({
       household_id: household.id,
       source_email_id: emailId,
