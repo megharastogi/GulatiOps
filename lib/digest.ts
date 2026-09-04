@@ -29,7 +29,7 @@ export type SourceEmail = {
   summary: string | null;
 };
 
-const SOURCE_EMAIL =
+export const SOURCE_EMAIL =
   'source_email:inbound_emails!source_email_id (id, subject, source_name, from_name, received_at, summary)';
 
 export type Digest = {
