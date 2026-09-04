@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { getHousehold } from '@/lib/household';
 import { getDigest } from '@/lib/digest';
+import { buildBrief, briefToText } from '@/lib/brief';
+import BriefCard from './BriefCard';
 import { ActionCard, EventDays, daysUntil, formatDate, formatWhen, mailHref } from '../cards';
 import Link from 'next/link';
 
@@ -13,6 +15,7 @@ export default async function WeekPage() {
 
   const { school_events_next_two_weeks: events, open_action_items: actions } = digest;
   const emails = digest.emails_past_week;
+  const brief = buildBrief(digest);
 
   // Split the fortnight so "this week" is genuinely this week.
   const thisWeek = events.filter((e: any) => daysUntil(e.start_date) <= 7);
@@ -30,8 +33,10 @@ export default async function WeekPage() {
         </p>
       </div>
 
+      {!brief.isEmpty && <BriefCard brief={brief} text={briefToText(brief, household.name)} />}
+
       <section>
-        <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Next 7 days</h3>
+        <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>This week</h3>
         {thisWeek.length ? (
           <EventDays events={thisWeek} />
         ) : (
@@ -41,13 +46,13 @@ export default async function WeekPage() {
 
       {later.length > 0 && (
         <section>
-          <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>The week after</h3>
+          <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Looking ahead</h3>
           <EventDays events={later} />
         </section>
       )}
 
       <section>
-        <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Still open</h3>
+        <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Open items</h3>
         {actions.length ? (
           <div style={sectionStyle}>
             {actions.map((a: any) => (
@@ -59,8 +64,11 @@ export default async function WeekPage() {
         )}
       </section>
 
-      <section>
-        <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Came in this week</h3>
+      <details className="week-mail">
+        <summary>
+          Came in this week
+          <span className="muted"> · {emails.length}</span>
+        </summary>
         {emails.length ? (
           <div style={sectionStyle}>
             {emails.map((e: any) => (
@@ -81,7 +89,7 @@ export default async function WeekPage() {
         ) : (
           <p className="muted">No email came in this week.</p>
         )}
-      </section>
+      </details>
     </div>
   );
 }
