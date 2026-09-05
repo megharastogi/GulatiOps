@@ -15,6 +15,20 @@ const TABS: (Tab & { feature: Feature | null })[] = [
   { href: '/dashboard/trips', label: 'Trips', icon: 'trips', feature: 'trips' },
 ];
 
+/**
+ * Safari's Add to Home Screen prefers apple-mobile-web-app-title over the
+ * manifest, and this is the page a family is looking at when they add it —
+ * so the per-household name has to be set here as well as in the manifest.
+ */
+export async function generateMetadata() {
+  const household = await getHousehold().catch(() => null);
+  if (!household) return {};
+  return {
+    title: household.name,
+    appleWebApp: { capable: true, statusBarStyle: 'default' as const, title: household.name },
+  };
+}
+
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const household = await getHousehold();
   const tabs = TABS.filter((tab) => !tab.feature || hasFeature(household, tab.feature));
