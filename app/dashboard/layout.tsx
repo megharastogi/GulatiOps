@@ -22,8 +22,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <div className="app-shell">
       <header className="app-header">
-        <h1 style={{ fontSize: 18, margin: 0 }}>GulatiOps</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        {/* The household, not the product. Every family that uses this sees
+            their own name here — "GulatiOps" is whose software it is, which
+            is the least useful thing to put at the top of their screen. */}
+        <h1 className="app-title">{household.name}</h1>
+        <div className="app-header-actions">
           <Link href="/dashboard/setup" className="btn-ghost">
             Setup
           </Link>

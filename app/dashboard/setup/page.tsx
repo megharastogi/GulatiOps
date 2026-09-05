@@ -84,11 +84,7 @@ export default async function SetupPage() {
           opening the dashboard. Needs a paid Claude plan — Pro or above.
           Optional: everything here works without it.
         </p>
-        <ConnectorPanel
-          hasToken={(tokenCount ?? 0) > 0}
-          householdName={household.name}
-          examples={examples}
-        />
+        <ConnectorPanel hasToken={(tokenCount ?? 0) > 0} examples={examples} />
         <p className="muted" style={{ fontSize: 13, marginTop: 14, marginBottom: 0 }}>
           Treat that link like a password — anyone who has it can read this
           household&apos;s email and to-dos. If it ever gets out, generate a new

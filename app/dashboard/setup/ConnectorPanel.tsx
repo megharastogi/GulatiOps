@@ -59,15 +59,15 @@ export function CopyRow({ value }: { value: string }) {
  *
  * `examples` come from the server because they depend on which tools this
  * household has: suggesting "add milk to the groceries" to a family without
- * the groceries feature teaches them the app is broken.
+ * the groceries feature teaches them the app is broken. The connector's own
+ * name is deliberately generic — it is a label in someone else's settings
+ * screen, and it doesn't need to carry a family name to be recognisable.
  */
 export function ConnectorPanel({
   hasToken,
-  householdName,
   examples,
 }: {
   hasToken: boolean;
-  householdName: string;
   examples: string[];
 }) {
   const [pending, startTransition] = useTransition();
@@ -97,7 +97,7 @@ export function ConnectorPanel({
       <li>
         <span className="step-title">Name it</span>
         <span className="step-body">
-          Anything you&apos;ll recognise — <code>{householdName}</code> works.
+          Anything you&apos;ll recognise — <code>Household</code> works.
         </span>
       </li>
 

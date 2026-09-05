@@ -115,6 +115,7 @@ input[type='time'] {
   /* 8px vertical keeps Setup / Sign out a reachable target in the header. */
   padding: 8px 6px;
   text-decoration: none;
+  white-space: nowrap;
 }
 
 /* ---- Trip hourly grid ---- */
@@ -756,4 +757,23 @@ input[type='time'] {
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-muted);
+}
+
+/* The title yields first: a long household name truncates, and the controls
+   beside it keep their full width rather than wrapping "Sign out" onto a
+   second line. */
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.app-title {
+  font-size: 18px;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
