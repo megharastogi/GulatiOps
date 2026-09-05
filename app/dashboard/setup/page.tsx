@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getHousehold } from '@/lib/household';
+import { getHousehold, hasFeature } from '@/lib/household';
 import { ConnectorPanel, CopyRow } from './ConnectorPanel';
 
 export const dynamic = 'force-dynamic';
@@ -23,6 +23,19 @@ export default async function SetupPage() {
     .eq('household_id', household.id);
 
   const forwardingAddress = household.inbound_address;
+
+  // Only suggest what this household's tools can actually answer.
+  const examples = [
+    "What's coming up this week?",
+    'What do I still need to do?',
+    `Add "bring photos for class" to my list, due Tuesday`,
+    'I ordered the pizza, mark it done',
+    ...(hasFeature(household, 'groceries') ? ['Add eggs and avocados to the grocery list'] : []),
+    ...(hasFeature(household, 'calendar')
+      ? ['Put Curriculum Night on my calendar, and check I am free first']
+      : []),
+    ...(hasFeature(household, 'trips') ? ['Start planning our Thanksgiving trip'] : []),
+  ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
@@ -67,11 +80,20 @@ export default async function SetupPage() {
       <section>
         <h3 style={{ fontSize: 14, margin: '0 0 4px' }}>2. Connect Claude</h3>
         <p className="muted" style={{ marginTop: 0, fontSize: 14 }}>
-          Lets you ask Claude about your calendar and to-dos in plain English.
-          Needs a paid Claude plan — Pro or above. Optional; everything here
-          works without it.
+          Lets you ask Claude about this household in plain English instead of
+          opening the dashboard. Needs a paid Claude plan — Pro or above.
+          Optional: everything here works without it.
         </p>
-        <ConnectorPanel hasToken={(tokenCount ?? 0) > 0} />
+        <ConnectorPanel
+          hasToken={(tokenCount ?? 0) > 0}
+          householdName={household.name}
+          examples={examples}
+        />
+        <p className="muted" style={{ fontSize: 13, marginTop: 14, marginBottom: 0 }}>
+          Treat that link like a password — anyone who has it can read this
+          household&apos;s email and to-dos. If it ever gets out, generate a new
+          one here and the old one stops working immediately.
+        </p>
       </section>
     </div>
   );
