@@ -33,9 +33,17 @@ async function getValidAccessToken(householdId: string): Promise<string> {
     }),
   });
   if (!resp.ok) {
+    // Send people to the domain they actually sign in on. A re-auth started on
+    // any other host silently fails: the `google_oauth_state` cookie is set on
+    // the host that served /api/google-oauth, and GOOGLE_REDIRECT_URI sends
+    // Google's callback to a single fixed host. Start on the wrong one and you
+    // approve at Google — so the grant looks granted — then the callback
+    // rejects the state and nothing is ever written here.
+    const appUrl = process.env.APP_URL || 'https://gulatiops.org';
     throw new Error(
       `Token refresh failed: ${await resp.text()}. The Google OAuth consent screen is in Testing mode, ` +
-      `so refresh tokens expire after 7 days. Re-auth at https://gulati-ops.vercel.app/api/google-oauth and try again.`
+      `so refresh tokens expire after 7 days. Re-auth at ${appUrl}/api/google-oauth — sign in on ` +
+      `${appUrl} first, and complete the flow on that same domain — then try again.`
     );
   }
   const tokens = await resp.json();

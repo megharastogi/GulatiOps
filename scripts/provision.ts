@@ -33,7 +33,7 @@ const supabase = createClient(
 // The domain your Cloudflare Email Routing rules live on. Addresses are
 // built as <address>@<MAIL_DOMAIN>.
 const MAIL_DOMAIN = process.env.MAIL_DOMAIN || 'gulatiops.org';
-const APP_URL = process.env.APP_URL || 'https://gulati-ops.vercel.app';
+const APP_URL = process.env.APP_URL || 'https://gulatiops.org';
 
 // ---- your household, for --upgrade-owner ----
 const OWNER = {

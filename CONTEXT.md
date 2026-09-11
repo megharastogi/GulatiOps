@@ -72,12 +72,15 @@ deploy unambiguously alongside the dashboard frontend).
 - Custom address `chief@gulatiops.org` verified, currently forwards directly
   to Megha's Gmail (test email succeeded)
 - Supabase project created, full `schema.sql` applied
-- Vercel project created and deployed at `gulati-ops.vercel.app`
+- Vercel project created and deployed at `gulati-ops.vercel.app`, now
+  served at the custom domain `gulatiops.org`. Use `gulatiops.org`
+  everywhere — the vercel.app host still resolves, which is a trap; see
+  the OAuth note under Gotchas.
 - GitHub repo: `megharastogi/GulatiOps`
 - Google Cloud project `GulatiOps` created, OAuth consent screen configured
   (External, in Testing mode), Calendar API enabled
 - Google OAuth credentials created with redirect URI
-  `https://gulati-ops.vercel.app/api/google-callback`
+  `https://gulatiops.org/api/google-callback`
 - Anthropic API key obtained
 - All Vercel env vars set EXCEPT possibly Resend (skipped for now)
 - `vercel.json` was removed because it broke the build; Vercel auto-detects
@@ -191,7 +194,7 @@ INBOUND_SHARED_SECRET          (openssl rand -hex 32, also goes to CF Worker)
 MCP_SHARED_SECRET              (openssl rand -hex 32, also goes to claude.ai connector header)
 GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET
-GOOGLE_REDIRECT_URI=https://gulati-ops.vercel.app/api/google-callback
+GOOGLE_REDIRECT_URI=https://gulatiops.org/api/google-callback
 ```
 
 `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` are new as of the
@@ -247,7 +250,7 @@ not, troubleshoot the env file loading.
 
 After seed succeeds:
 
-1. Visit `https://gulati-ops.vercel.app/api/google-oauth` in browser, approve
+1. Visit `https://gulatiops.org/api/google-oauth` in browser, approve
    calendar access. Confirm `google_oauth_tokens` table has a row.
 
 2. Set up Cloudflare Email Worker:
@@ -277,7 +280,7 @@ After seed succeeds:
 
 5. Connect MCP to claude.ai:
    - Settings → Connectors → Add custom connector
-   - URL: `https://gulati-ops.vercel.app/api/mcp`
+   - URL: `https://gulatiops.org/api/mcp`
    - Custom header: `x-mcp-secret: <value of MCP_SHARED_SECRET>`
    - Create Project "GulatiOps" with this connector enabled
    - Add project instructions about Megha's preferences (terse, logistical,
@@ -294,8 +297,8 @@ production:
 2. **Enable magic-link email in Supabase**: Supabase dashboard -> Authentication
    -> Providers -> Email should be enabled by default, but confirm "Confirm
    email" / OTP settings are on. Authentication -> URL Configuration -> set
-   **Site URL** to `https://gulati-ops.vercel.app` and add
-   `https://gulati-ops.vercel.app/auth/callback` to **Redirect URLs**
+   **Site URL** to `https://gulatiops.org` and add
+   `https://gulatiops.org/auth/callback` to **Redirect URLs**
    (magic-link sign-in will fail with a redirect mismatch otherwise).
 3. **Restrict/disable public signup** (defense in depth): the login server
    action already rejects any email that isn't `PRIMARY_DIGEST_EMAIL`, but
@@ -306,7 +309,7 @@ production:
    references `/icons/apple-touch-icon.png` — none of these image files
    exist yet. Add real PNGs at those paths for a proper home-screen icon;
    until then iOS "Add to Home Screen" will fall back to a page screenshot.
-5. **Install on iPhone**: visit `https://gulati-ops.vercel.app/dashboard` in
+5. **Install on iPhone**: visit `https://gulatiops.org/dashboard` in
    Safari, sign in via magic link, then Share -> Add to Home Screen.
 
 Push notifications for urgent items (the original motivation for going
@@ -326,6 +329,14 @@ handler, and a backend job/cron to trigger sends.
 - Because the OAuth consent screen is still in Testing mode, Google expires
   the refresh token after 7 days. If calendar reads/writes start erroring
   (e.g. "Token refresh failed"), re-auth at
-  `https://gulati-ops.vercel.app/api/google-oauth` and try again. To stop
-  this recurring, switch the consent screen from Testing to "In production"
-  in Google Cloud Console → APIs & Services → OAuth consent screen.
+  `https://gulatiops.org/api/google-oauth` and try again. To stop this
+  recurring, switch the consent screen from Testing to "In production" in
+  Google Cloud Console → APIs & Services → OAuth consent screen.
+- **Start that re-auth on `gulatiops.org`, signed in there.** Both
+  `gulatiops.org` and `gulati-ops.vercel.app` still serve this app, but the
+  flow cannot cross hosts: the `google_oauth_state` cookie is set by
+  whichever host served `/api/google-oauth`, while `GOOGLE_REDIRECT_URI`
+  sends Google's callback to one fixed host. Begin on the wrong one and you
+  approve at Google — so it looks granted — then the callback fails its
+  state check and no token is ever stored. This cost an afternoon on
+  2026-09-11.
