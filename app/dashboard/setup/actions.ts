@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { revalidatePath } from 'next/cache';
 import { getHousehold } from '@/lib/household';
 import type { Kid } from '@/lib/members';
+import { INSTRUCTIONS_MAX } from '@/lib/household-settings';
 
 const admin = createClient(
   process.env.SUPABASE_URL!,
@@ -135,4 +136,35 @@ export async function removeKid(id: string): Promise<{ kids?: Kid[]; error?: str
 
   revalidatePath('/dashboard/setup');
   return { kids: await listKids() };
+}
+
+/**
+ * Saves the household's free-text parser preferences.
+ *
+ * This text is pasted into the prompt for every single email that arrives, so
+ * it's capped rather than unbounded — a long enough blob would cost real money
+ * per parse and start crowding out the email itself. Empty saves as null so
+ * the parser omits the section entirely rather than being handed a blank
+ * heading to interpret.
+ */
+export async function saveParserInstructions(
+  text: string
+): Promise<{ saved?: boolean; error?: string }> {
+  const household = await getHousehold().catch(() => null);
+  if (!household) return { error: 'Not signed in.' };
+
+  const trimmed = text.trim();
+  if (trimmed.length > INSTRUCTIONS_MAX) {
+    return { error: `Keep it under ${INSTRUCTIONS_MAX} characters.` };
+  }
+
+  const { error } = await admin
+    .from('households')
+    .update({ parser_instructions: trimmed || null })
+    .eq('id', household.id);
+
+  if (error) return { error: 'Could not save that. Nothing changed.' };
+
+  revalidatePath('/dashboard/setup');
+  return { saved: true };
 }

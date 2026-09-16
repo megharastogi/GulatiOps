@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { getHousehold, hasFeature } from '@/lib/household';
 import { ConnectorPanel, CopyRow } from './ConnectorPanel';
 import { KidsPanel } from './KidsPanel';
+import { ParserInstructions } from './ParserInstructions';
 import { listKids } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -61,6 +62,17 @@ export default async function SetupPage() {
           fine — add a row each.
         </p>
         <KidsPanel initialKids={kids} />
+      </section>
+
+      <section>
+        <h3 style={{ fontSize: 14, margin: '0 0 4px' }}>Anything else we should know</h3>
+        <p className="muted" style={{ marginTop: 0, fontSize: 14 }}>
+          Free text, read alongside every email that arrives. Useful for the
+          things that aren&apos;t about one kid — what to ignore, what always
+          matters, how your family actually works. You probably won&apos;t know
+          what to put here until you&apos;ve seen a week of it.
+        </p>
+        <ParserInstructions initial={household.parser_instructions} />
       </section>
 
       <section>
