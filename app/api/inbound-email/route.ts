@@ -6,6 +6,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Resend } from 'resend';
 import { timingSafeEqual } from 'crypto';
 import { getHouseholdByInboundAddress, type Household } from '@/lib/household';
+import { ageOn } from '@/lib/members';
 import {
   extractLinks,
   fetchNewsletterContent,
@@ -379,10 +380,18 @@ async function parseAndProcessEmail(emailId: string, household: any) {
 
   // Build context for the parser
   const today = new Date().toISOString().slice(0, 10);
-  const householdMembers = await supabase
+  const { data: members } = await supabase
     .from('household_members')
-    .select('name, role, notes')
+    .select('name, role, school, grade, birthdate, notes')
     .eq('household_id', household.id);
+
+  // Age is worked out here rather than stored. A number typed into the setup
+  // form is wrong from that child's next birthday onwards, and everything
+  // below this line treats what it's handed as a fact about the family.
+  const householdMembers = (members ?? []).map(({ birthdate, ...member }) => ({
+    ...member,
+    age: birthdate ? ageOn(birthdate, today) : null,
+  }));
 
   // Free-text the household wrote about itself: "we skip PTA fundraisers",
   // "our 2nd grader is in Mr. Alvarez's class". Written by the household owner
@@ -420,7 +429,7 @@ async function parseAndProcessEmail(emailId: string, household: any) {
 "chief of staff" system. Extract structured information.
 
 Today's date: ${today}
-Household members: ${JSON.stringify(householdMembers.data)}
+Household members: ${JSON.stringify(householdMembers)}
 ${householdInstructions}${existingSection}${existingActionSection}
 Email:
 From: ${email.from_name || ''} <${email.from_address}>

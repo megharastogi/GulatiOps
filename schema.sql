@@ -395,3 +395,33 @@ end $$;
 -- google_oauth_tokens and mcp_tokens deliberately get NO policy. They hold
 -- credential material and are only ever touched server-side with the
 -- service-role key; under RLS default-deny, `authenticated` gets nothing.
+
+-- ============================================================
+-- MIGRATION: per-child school details + first-run onboarding
+-- ============================================================
+-- Apply this BEFORE deploying the code that goes with it. The redirect in
+-- app/auth/callback/route.ts reads households.onboarded_at, so if the deploy
+-- lands first, every sign-in errors on a column that doesn't exist yet.
+
+-- Where each child actually goes. Until now this lived in the free-text
+-- `notes` column ("Kindergarten, Ms. Chen") — readable by the email parser,
+-- but not by anything else. A family with two children at two different
+-- schools is the case that needed it to be its own field.
+alter table household_members add column if not exists school text;
+
+-- Text rather than an integer: Pre-K, TK and Kindergarten are all real
+-- answers, and so is "Year 3" if a family ever needs it.
+alter table household_members add column if not exists grade text;
+
+-- Note there is deliberately no `age` column. Age is derived from the
+-- existing `birthdate` above, at the moment it's needed (see ageOn() in
+-- lib/members.ts). An age typed into a form is wrong by the child's next
+-- birthday, and it reaches the email parser as a stated fact about the family.
+
+-- Null means "has never been through the setup wizard". Every household that
+-- existed before this migration was onboarded by hand, so they are marked
+-- done below — without that backfill they would all be redirected into the
+-- new-family wizard on their next sign-in.
+alter table households add column if not exists onboarded_at timestamptz;
+
+update households set onboarded_at = created_at where onboarded_at is null;

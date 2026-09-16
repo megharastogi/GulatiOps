@@ -30,6 +30,8 @@ export type Household = {
   features: string[];
   inbound_address: string | null;
   parser_instructions: string | null;
+  /** Null until the family has been through (or skipped) the first-run wizard. */
+  onboarded_at: string | null;
   [key: string]: any;
 };
 

@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getHousehold, hasFeature } from '@/lib/household';
 import { ConnectorPanel, CopyRow } from './ConnectorPanel';
+import { KidsPanel } from './KidsPanel';
+import { listKids } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +26,10 @@ export default async function SetupPage() {
 
   const forwardingAddress = household.inbound_address;
 
+  // The same editor the first-run wizard uses. Families onboarded before the
+  // wizard existed never see it, so this is their only way in.
+  const kids = await listKids();
+
   // Only suggest what this household's tools can actually answer.
   const examples = [
     "What's coming up this week?",
@@ -42,9 +48,20 @@ export default async function SetupPage() {
       <div>
         <h2 style={{ fontSize: 17, margin: '0 0 4px' }}>Setup</h2>
         <p className="muted" style={{ margin: 0, fontSize: 14 }}>
-          Two things to connect. Both are one-time.
+          Who&apos;s in the family, and two things to connect.
         </p>
       </div>
+
+      <section>
+        <h3 style={{ fontSize: 14, margin: '0 0 4px' }}>Your kids</h3>
+        <p className="muted" style={{ marginTop: 0, fontSize: 14 }}>
+          Names, schools and grades go to whatever reads this household&apos;s
+          email, so a newsletter comes back as &ldquo;permission slip for
+          Ada&rdquo; rather than something generic. Two kids at two schools is
+          fine — add a row each.
+        </p>
+        <KidsPanel initialKids={kids} />
+      </section>
 
       <section>
         <h3 style={{ fontSize: 14, margin: '0 0 4px' }}>1. Forward your school email</h3>

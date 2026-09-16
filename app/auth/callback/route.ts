@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
+import { getHouseholdForUser } from '@/lib/household';
 
 const admin = createAdminClient(
   process.env.SUPABASE_URL!,
@@ -47,6 +48,21 @@ async function attachInvitedUser(authUserId: string, email: string | undefined) 
     );
 }
 
+/**
+ * Where to send someone who has just signed in.
+ *
+ * A household that hasn't been through the wizard goes there first; everyone
+ * else goes where they were headed. Only the default destination is
+ * redirected — a magic link carrying an explicit `next` was aimed at a
+ * particular page, and hijacking that would break every link we ever send.
+ */
+async function destinationFor(authUserId: string, next: string): Promise<string> {
+  if (next !== '/dashboard') return next;
+
+  const household = await getHouseholdForUser(authUserId);
+  return household && !household.onboarded_at ? '/onboarding' : next;
+}
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
@@ -58,7 +74,8 @@ export async function GET(request: Request) {
 
     if (!error && data.user) {
       await attachInvitedUser(data.user.id, data.user.email);
-      return NextResponse.redirect(`${origin}${next}`);
+      const destination = await destinationFor(data.user.id, next);
+      return NextResponse.redirect(`${origin}${destination}`);
     }
   }
 
