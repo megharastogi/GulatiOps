@@ -33,7 +33,11 @@ export default async function DashboardHome() {
       .eq('household_id', household.id)
       .gte('start_date', today)
       .lte('start_date', twoWeeksStr)
-      .order('start_date', { ascending: true }),
+      // Date alone leaves same-day events in insert order, which put a 4:30
+      // practice above a 9:00 Mass. All-day events have no time and sort to
+      // the top of their day, the way a calendar app shows them.
+      .order('start_date', { ascending: true })
+      .order('start_time', { ascending: true, nullsFirst: true }),
     // No .limit() here any more: the five that matter can only be chosen
     // after sortActionItems has run, and LIMIT in SQL was picking a different
     // five by a different rule.

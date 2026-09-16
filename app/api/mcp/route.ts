@@ -427,7 +427,9 @@ async function callTool(name: string, args: any, household: Household) {
         .gte('start_date', start)
         .lte('start_date', end);
       if (args.event_types?.length) q = q.in('event_type', args.event_types);
-      const { data } = await q.order('start_date', { ascending: true });
+      const { data } = await q
+        .order('start_date', { ascending: true })
+        .order('start_time', { ascending: true, nullsFirst: true });
       return data || [];
     }
 

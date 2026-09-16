@@ -175,7 +175,8 @@ export function EventCard({ event }: { event: any }) {
 
 /**
  * Events for one day, under a single heading. Assumes the list is already
- * ordered by start_date, which every caller's query guarantees.
+ * ordered by start_date then start_time, which every caller's query
+ * guarantees.
  */
 export function EventDays({ events }: { events: any[] }) {
   const days: [string, any[]][] = [];

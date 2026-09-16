@@ -92,7 +92,8 @@ export async function getDigest(
       .eq('household_id', householdId)
       .gte('start_date', todayStr)
       .lte('start_date', twoWeeksStr)
-      .order('start_date'),
+      .order('start_date')
+      .order('start_time', { ascending: true, nullsFirst: true }),
     supabase
       .from('action_items')
       .select(`*, ${SOURCE_EMAIL}`)
