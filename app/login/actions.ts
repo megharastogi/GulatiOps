@@ -6,6 +6,31 @@ import { createClient } from '@/lib/supabase/server';
 
 type State = { sent?: boolean; error?: string };
 
+/**
+ * Supabase's own wording, translated for someone who has never heard of
+ * Supabase.
+ *
+ * The project sends two auth emails an hour on the built-in provider, shared
+ * across every household, so the person most likely to see this is whoever
+ * signs in for the first time shortly after someone else did — a brand-new
+ * family, with no reason to read "email rate limit exceeded" as anything other
+ * than "this is broken". Saying it's temporary is the difference between them
+ * trying again and them never coming back.
+ *
+ * Anything else keeps Supabase's message: those are rare and worth being able
+ * to read straight off the screen.
+ */
+function signInError(error: { message: string; status?: number; code?: string }): string {
+  const rateLimited =
+    error.code === 'over_email_send_rate_limit' ||
+    error.status === 429 ||
+    /rate limit/i.test(error.message);
+
+  return rateLimited
+    ? 'Too many sign-in emails were sent just now. Try again in half an hour — nothing is wrong with your account.'
+    : error.message;
+}
+
 const admin = createAdminClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -51,6 +76,6 @@ export async function requestMagicLink(_prevState: State, formData: FormData): P
     options: { emailRedirectTo: `${origin}/auth/callback` },
   });
 
-  if (error) return { error: error.message };
+  if (error) return { error: signInError(error) };
   return { sent: true };
 }
