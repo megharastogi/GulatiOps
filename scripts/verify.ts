@@ -42,6 +42,7 @@ async function checkSchema() {
   const probes: [string, string][] = [
     ['households', 'features, inbound_address, parser_instructions, invited_email'],
     ['household_users', 'household_id, auth_user_id, role'],
+    ['household_invites', 'household_id, email, role, claimed_at, claimed_by'],
     ['mcp_tokens', 'household_id, token_hash, revoked_at'],
     ['inbound_emails', 'message_id'],
   ];
@@ -81,16 +82,33 @@ async function checkHouseholds() {
       .select('id', { count: 'exact', head: true })
       .eq('household_id', h.id);
 
+    const { data: invites } = await admin
+      .from('household_invites')
+      .select('email, role, claimed_at')
+      .eq('household_id', h.id)
+      .order('created_at');
+
     console.log(`\n  ${h.name}`);
     console.log(`    features:   ${(h.features || []).join(', ') || '(none)'}`);
     console.log(`    forwards to: ${h.inbound_address || '⚠ not set'}`);
-    console.log(`    invited:     ${h.invited_email || '⚠ not set — they cannot sign in'}`);
+    console.log(`    invited:     ${
+      invites?.length
+        ? invites
+            .map((i) => `${i.email} (${i.role}${i.claimed_at ? '' : ', not signed in yet'})`)
+            .join('\n                 ')
+        : '⚠ nobody — they cannot sign in'
+    }`);
     console.log(`    logins:      ${users ?? 0}`);
     console.log(`    mcp tokens:  ${tokens ?? 0} active`);
     console.log(`    emails:      ${emails ?? 0}`);
 
     if (!h.inbound_address) bad(`${h.name} has no inbound_address`, 'mail for it cannot route');
-    if (!h.invited_email) bad(`${h.name} has no invited_email`, 'nobody can sign in');
+    if (!invites?.length) bad(`${h.name} has no invites`, 'nobody can sign in');
+    // Without one, the setup page has no unremovable row and the household can
+    // delete its own last way back in.
+    if (invites?.length && !invites.some((i) => i.role === 'owner')) {
+      bad(`${h.name} has no owner invite`, 'every login there can be removed');
+    }
     if ((users ?? 0) === 0) {
       console.log(`    ⚠ no login attached yet — they get "not attached to a household" until first sign-in`);
     }
@@ -120,6 +138,7 @@ async function checkRls() {
     'trip_days',
     'trip_activities',
     'household_users',
+    'household_invites',
     'mcp_tokens',
     'google_oauth_tokens',
   ];

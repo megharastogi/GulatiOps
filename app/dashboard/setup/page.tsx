@@ -4,7 +4,8 @@ import { getHousehold, hasFeature } from '@/lib/household';
 import { ConnectorPanel, CopyRow } from './ConnectorPanel';
 import { KidsPanel } from './KidsPanel';
 import { ParserInstructions } from './ParserInstructions';
-import { listKids } from './actions';
+import { PeoplePanel } from './PeoplePanel';
+import { listKids, listLogins } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,9 @@ export default async function SetupPage() {
   // The same editor the first-run wizard uses. Families onboarded before the
   // wizard existed never see it, so this is their only way in.
   const kids = await listKids();
+
+  const logins = await listLogins();
+  const signInUrl = `${process.env.APP_URL || ''}/login`;
 
   // Only suggest what this household's tools can actually answer.
   const examples = [
@@ -119,6 +123,18 @@ export default async function SetupPage() {
           household&apos;s email and to-dos. If it ever gets out, generate a new
           one here and the old one stops working immediately.
         </p>
+      </section>
+
+      <section>
+        <h3 style={{ fontSize: 14, margin: '0 0 4px' }}>Who else can sign in</h3>
+        <p className="muted" style={{ marginTop: 0, fontSize: 14 }}>
+          Add a partner, a grandparent, anyone who should see this. They get the
+          same view you do — the same email, the same to-dos, the same setup
+          page — so only add someone you&apos;d hand your phone to. Adding them
+          here is what lets them request a sign-in link; nothing is emailed out,
+          so you&apos;ll need to tell them yourself.
+        </p>
+        <PeoplePanel initialLogins={logins} signInUrl={signInUrl} />
       </section>
     </div>
   );

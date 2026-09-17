@@ -18,18 +18,24 @@ export async function requestMagicLink(_prevState: State, formData: FormData): P
 
   if (!email) return { error: 'Enter an email address.' };
 
-  // The allowlist is now the invite list rather than a single env var: a
-  // household must name this address in `invited_email` before it can request
-  // a link at all. invited_email is never cleared, so this check passes for
-  // returning users as well as first-time ones.
+  // The allowlist is the invite list rather than a single env var: some
+  // household must have named this address in household_invites before it can
+  // request a link at all. Invite rows are not consumed on sign-in, so this
+  // check passes for returning users as well as first-time ones — which is
+  // also why deleting the row is what revokes access.
   //
   // Without this, anyone could request a magic link and get a valid Supabase
   // session — middleware would still refuse them for having no household, but
   // there's no reason to hand out sessions we intend to reject.
+  //
+  // Exact match, not ilike. Rows are stored lowercase (and constrained to it),
+  // so nothing is lost — and under ilike the `_` in an ordinary address like
+  // first_last@gmail.com is a wildcard that can match another household's
+  // invite, which is a way in for an address nobody invited.
   const { data: invited } = await admin
-    .from('households')
-    .select('id')
-    .ilike('invited_email', email)
+    .from('household_invites')
+    .select('household_id')
+    .eq('email', email)
     .maybeSingle();
 
   if (!invited) {

@@ -8,7 +8,8 @@
 //       already forwards your school mail; it defaults to chief@$MAIL_DOMAIN.
 //       Backfills your existing household with the columns the
 //       multi-tenant code now expects (features, inbound_address,
-//       invited_email) and links your existing Supabase auth user to it.
+//       invited_email), records your invite, and links your existing Supabase
+//       auth user to it.
 //       Run this BEFORE deploying, or you'll lock yourself out — middleware
 //       authorizes on household membership now, and yours doesn't exist yet.
 //
@@ -60,6 +61,36 @@ function mintToken() {
   return { token, hash: createHash('sha256').update(token, 'utf8').digest('hex') };
 }
 
+/**
+ * Records who may sign in to a household. The sign-in allowlist reads
+ * household_invites, so a household without a row here has no way in, however
+ * complete the rest of its setup is.
+ *
+ * Owner, in both callers: this is the founding address, and an owner row is
+ * the one the setup page refuses to remove. Check-then-insert rather than an
+ * upsert because the unique index is on lower(email), an expression that
+ * supabase-js can't name as a conflict target.
+ */
+async function inviteOwner(householdId: string, email: string) {
+  // household_invites.email is constrained to lowercase; normalising here
+  // keeps the helper correct whatever a caller passes in.
+  const normalized = email.trim().toLowerCase();
+
+  const { data: existing } = await supabase
+    .from('household_invites')
+    .select('id')
+    .eq('email', normalized)
+    .maybeSingle();
+
+  if (existing) return;
+
+  const { error } = await supabase
+    .from('household_invites')
+    .insert({ household_id: householdId, email: normalized, role: 'owner' });
+
+  if (error) throw new Error(`Could not record the invite for ${email}: ${error.message}`);
+}
+
 async function upgradeOwner() {
   // Must match the Cloudflare Email Routing rule that already forwards your
   // school mail — if it doesn't, your own inbound email stops resolving.
@@ -79,6 +110,8 @@ async function upgradeOwner() {
   if (error || !household) {
     throw new Error(`Could not find your household by digest_email. ${error?.message ?? ''}`);
   }
+
+  await inviteOwner(household.id, OWNER.digest_email);
 
   // Link the Supabase auth user you already sign in with. Without this row
   // middleware treats you as unauthorized and redirects to /login.
@@ -147,6 +180,8 @@ async function provisionFamily() {
 
   if (error || !household) throw new Error(`Insert failed: ${error?.message}`);
 
+  await inviteOwner(household.id, email);
+
   const members = arg('members');
   if (members) {
     const rows = JSON.parse(members).map((m: any) => ({ ...m, household_id: household.id }));
@@ -166,6 +201,7 @@ async function provisionFamily() {
   console.log(`    Cloudflare → Email Routing → add ${inboundAddress} → the email worker\n`);
   console.log(`  Send them:`);
   console.log(`    Dashboard:  ${APP_URL}/login   (sign in as ${email})`);
+  console.log(`      They can add anyone else from Setup once they're in.`);
   console.log(`    Forward to: ${inboundAddress}`);
   console.log(`    MCP URL:    ${APP_URL}/api/mcp?secret=${token}`);
   console.log(`\n  The MCP token is shown once — only its hash is stored.\n`);

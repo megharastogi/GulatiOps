@@ -375,6 +375,8 @@ create policy households_member_read on households
 
 -- Every household-scoped table gets the same policy shape. Uniformity is the
 -- point: one rule to verify rather than a map of which tables are protected.
+-- household_invites takes this same shape but is created further down, in the
+-- multi-login migration, so it applies its policy there.
 do $$
 declare t text;
 begin
@@ -425,3 +427,85 @@ alter table household_members add column if not exists grade text;
 alter table households add column if not exists onboarded_at timestamptz;
 
 update households set onboarded_at = created_at where onboarded_at is null;
+
+-- ============================================================
+-- MIGRATION: more than one login per household
+-- ============================================================
+-- Apply this BEFORE deploying the code that goes with it. Both the sign-in
+-- allowlist (app/login/actions.ts) and the attach-on-first-sign-in step
+-- (app/auth/callback/route.ts) read household_invites. If the deploy lands
+-- first, every sign-in fails against a table that doesn't exist yet — for
+-- every household, not just new ones.
+--
+-- households.invited_email is deliberately left in place and unread. Dropping
+-- it in the same change would make a rollback unrecoverable; drop it in a
+-- later one, once this has held.
+
+-- One row per person who may sign in, replacing households.invited_email,
+-- which could only ever name one. The row is a permanent allowlist entry
+-- rather than a one-time ticket: app/login/actions.ts checks it on every
+-- magic-link request, not just the first, so deleting a row is how access is
+-- taken away.
+create table if not exists household_invites (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references households(id) on delete cascade,
+
+  -- Stored lowercase, and constrained to it. Every lookup matches with plain
+  -- equality rather than ILIKE: a typed address is data, not a pattern, and
+  -- under ILIKE the `_` in an ordinary address like first_last@gmail.com is a
+  -- single-character wildcard that can match a *different* household's invite.
+  -- That would let someone sign in against an address they don't own and be
+  -- attached to a household that never invited them.
+  email text not null check (email = lower(email)),
+
+  -- Copied onto household_users when the invite is claimed. Nothing in the
+  -- app gates on it — a member sees exactly what an owner sees — with one
+  -- exception: an owner row cannot be removed, which is what stops a
+  -- household deleting its own last way back in. Not to be confused with
+  -- household_members.role ('parent' | 'child'), which describes the family
+  -- rather than who can log in.
+  role text not null default 'member',   -- 'owner' | 'member'
+
+  created_at timestamptz default now(),
+
+  -- Stamped when the invited person first signs in. The allowlist check
+  -- ignores both: they exist so the setup page can say "hasn't signed in
+  -- yet", and so removing someone can find the household_users row to delete
+  -- alongside the invite.
+  claimed_at timestamptz,
+  claimed_by uuid
+);
+
+-- Global rather than per-household, deliberately. getHouseholdForUser() takes
+-- the first membership row it finds, so one address invited by two households
+-- would resolve to an arbitrary one of them. This is the same invariant the
+-- old households_invited_email_key held.
+create unique index if not exists household_invites_email_key
+  on household_invites (lower(email));
+
+create index if not exists household_invites_household_idx
+  on household_invites (household_id);
+
+-- Every household's existing single invite becomes a row. They are all
+-- founding users, so they are all owners. Ones whose person has already
+-- signed in are marked claimed, so the setup page doesn't list them as
+-- pending. distinct on keeps this deterministic if a household somehow has
+-- more than one membership row already.
+insert into household_invites (household_id, email, role, claimed_at, claimed_by)
+select distinct on (lower(h.invited_email))
+       h.id, lower(h.invited_email), 'owner', u.created_at, u.auth_user_id
+from households h
+left join household_users u on u.household_id = h.id
+where h.invited_email is not null
+order by lower(h.invited_email), u.created_at
+on conflict do nothing;
+
+-- Same policy shape as every other household-scoped table. Stated here as
+-- well as in the array above so that applying only this block is complete.
+alter table household_invites enable row level security;
+
+drop policy if exists household_invites_household_rw on household_invites;
+create policy household_invites_household_rw on household_invites
+  for all to authenticated
+  using (household_id in (select auth_household_ids()))
+  with check (household_id in (select auth_household_ids()));
