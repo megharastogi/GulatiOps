@@ -264,22 +264,30 @@ async function fetchExistingEvents(householdId: string) {
   return data || [];
 }
 
-// The household's open to-do list, for the same reason the calendar is passed
-// in: a Friday newsletter restating Wednesday's ask should land on the row
-// that already exists rather than beside it.
+// How far back a checked-off task still suppresses its restatements. School
+// newsletters repeat the same ask for weeks, and each repeat tends to push the
+// due date later, so the done row's own due date is no guide: a September
+// audit found 22 tasks recreated after being checked off, and a window keyed
+// on due dates would have missed some. Sixty days caught all of them.
+const DONE_LOOKBACK_DAYS = 60;
+
+// The household's to-do list, for the same reason the calendar is passed in:
+// a Friday newsletter restating Wednesday's ask should land on the row that
+// already exists rather than beside it.
 //
-// Deliberately only OPEN items. Matching against completed ones would stop the
-// next newsletter resurrecting a task you finished, but it would also silently
-// swallow anything genuinely recurring — the weekly pizza order is a real task
-// each week, not an echo of last week's.
+// Open items, plus anything checked off within DONE_LOOKBACK_DAYS so the next
+// newsletter can't resurrect a task you finished. Genuinely recurring tasks —
+// the weekly pizza order, each month's tuition — are kept apart by the
+// parser's recurrence rule, not by leaving done rows out.
 async function fetchExistingActionItems(householdId: string) {
+  const since = new Date(Date.now() - DONE_LOOKBACK_DAYS * 86_400_000).toISOString();
   const { data } = await supabase
     .from('action_items')
-    .select('id, title, due_date, category, details_url, description, priority, source_email_id')
+    .select('id, title, due_date, category, details_url, description, priority, source_email_id, status, done_at')
     .eq('household_id', householdId)
-    .eq('status', 'open')
+    .or(`status.eq.open,and(status.eq.done,done_at.gte.${since})`)
     .order('due_date', { ascending: true, nullsFirst: false })
-    .limit(150);
+    .limit(200);
   return data || [];
 }
 
@@ -420,8 +428,12 @@ async function parseAndProcessEmail(emailId: string, household: any) {
   const existingActions = await fetchExistingActionItems(household.id);
   const knownActionIds = new Set(existingActions.map((a) => a.id));
   const existingActionSection = existingActions.length
-    ? `\nAlready on this family's to-do list (do NOT add these again — reference them by id instead):\n${existingActions
-        .map((a) => `- id=${a.id} | due ${a.due_date ?? 'unspecified'} | ${a.title}`)
+    ? `\nAlready on this family's to-do list, including tasks they have already checked off (do NOT add these again — reference them by id instead):\n${existingActions
+        .map(
+          (a) =>
+            `- id=${a.id} | due ${a.due_date ?? 'unspecified'} | ${a.title}` +
+            (a.status === 'done' ? ` | ALREADY DONE (checked off ${a.done_at?.slice(0, 10)})` : '')
+        )
         .join('\n')}\n`
     : '';
 
@@ -483,6 +495,8 @@ Rules:
 - Two entries are the same real-world event when they describe the same happening, even if worded differently ("All-School Mass" = "First All-School Mass") or dated differently (a later email correcting the date). Set "duplicate_of" for those
 - Do NOT set "duplicate_of" for events that merely fall on the same day, or for a recurring event's other occurrences — those are separate rows
 - Only ever use an id that appears verbatim in the already-on-calendar list; never invent one
+- For action items, set "duplicate_of" to an ALREADY DONE task too when this email is a reminder or restatement of it — newsletters repeat the same ask for weeks, often with a later due date, and the family has already handled it
+- But a recurring task's next occurrence is a NEW task, not a duplicate of a done one: this month's tuition statement vs last month's, this week's pizza order vs last week's, a second meet's volunteer signup vs the first meet's. Tell them apart by what period or occasion the task is for, not by wording
 - If nothing extractable, return empty arrays for school_events and action_items`;
 
   const parseResp = await anthropic.messages.create({
@@ -571,6 +585,11 @@ Rules:
 
   for (const item of parsed.action_items || []) {
     const target = item.duplicate_of ? existingActionById.get(item.duplicate_of) : null;
+
+    // A restatement of something already checked off is dropped outright —
+    // not reopened, and not merged, so a done row's details stay as they
+    // were when the family finished it.
+    if (target?.status === 'done') continue;
 
     if (target) {
       const patch = mergeIntoExisting(
