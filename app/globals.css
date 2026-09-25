@@ -380,6 +380,20 @@ input[type='time'] {
   line-height: 1;
 }
 
+.event-confirm {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* Fixed red rather than var(--danger): dark mode's lighter danger shade
+   leaves white button text too faint to read. */
+.btn-remove {
+  background: #dc2626;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
 .checkbox {
   position: relative;
   display: block;

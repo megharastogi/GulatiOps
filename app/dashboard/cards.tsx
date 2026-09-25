@@ -8,7 +8,7 @@
 import Link from 'next/link';
 import { type SourceEmail } from '@/lib/digest';
 import { markDone } from './actions';
-import RemoveEventButton from './RemoveEventButton';
+import EventRemoval from './EventRemoval';
 
 export function formatDate(dateStr: string) {
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', {
@@ -158,7 +158,7 @@ export function EventCard({ event }: { event: any }) {
         </div>
         <div className="datetile-time">{time ?? 'All day'}</div>
       </div>
-      <div className="grow">
+      <EventRemoval id={event.id} title={event.title}>
         <div style={{ fontWeight: 600 }}>{event.title}</div>
         {event.location && (
           <div className="muted" style={{ fontSize: 13 }}>
@@ -169,8 +169,7 @@ export function EventCard({ event }: { event: any }) {
           blurb={event.description || event.source_email?.summary}
           source={event.source_email}
         />
-      </div>
-      <RemoveEventButton id={event.id} title={event.title} />
+      </EventRemoval>
     </div>
   );
 }
