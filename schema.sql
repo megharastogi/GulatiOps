@@ -441,9 +441,9 @@ update households set onboarded_at = created_at where onboarded_at is null;
 -- first, every sign-in fails against a table that doesn't exist yet — for
 -- every household, not just new ones.
 --
--- households.invited_email is deliberately left in place and unread. Dropping
--- it in the same change would make a rollback unrecoverable; drop it in a
--- later one, once this has held.
+-- households.invited_email is deliberately left in place and unread here.
+-- Dropping it in the same change would make a rollback unrecoverable. It held,
+-- and the migration at the bottom of this file drops it.
 
 -- One row per person who may sign in, replacing households.invited_email,
 -- which could only ever name one. The row is a permanent allowlist entry
@@ -520,3 +520,25 @@ create policy household_invites_household_rw on household_invites
 -- applying schema.sql fresh (the column is in the table above).
 -- ============================================================
 alter table school_calendar add column if not exists hidden_at timestamptz;
+
+-- ============================================================
+-- MIGRATION: retire households.invited_email
+-- ============================================================
+-- Apply this AFTER deploying the code that goes with it — the reverse of the
+-- migration above, and for the same reason read backwards. Nothing served to a
+-- browser has read this column since household_invites landed; what still read
+-- it were scripts/provision.ts and scripts/verify.ts, until the commit this
+-- migration ships with. Run the drop first and `npm run verify` fails on a
+-- column that no longer exists.
+--
+-- Nothing is lost. The multi-login migration copied every invited_email into
+-- household_invites, lowercased, and that has been the only path a sign-in
+-- takes since 2026-09-16 — four households' worth of real sign-ins, including
+-- one first-time claim. The column has been write-only dead weight since:
+-- provision.ts kept setting it so that a rollback to the previous deploy would
+-- still have found it.
+--
+-- Dropping the column takes households_invited_email_key with it; the
+-- equivalent uniqueness now lives on household_invites_email_key.
+
+alter table households drop column if exists invited_email;

@@ -7,9 +7,8 @@
 //       One-time. --address must match the Cloudflare Email Routing rule that
 //       already forwards your school mail; it defaults to chief@$MAIL_DOMAIN.
 //       Backfills your existing household with the columns the
-//       multi-tenant code now expects (features, inbound_address,
-//       invited_email), records your invite, and links your existing Supabase
-//       auth user to it.
+//       multi-tenant code now expects (features, inbound_address), records
+//       your invite, and links your existing Supabase auth user to it.
 //       Run this BEFORE deploying, or you'll lock yourself out — middleware
 //       authorizes on household membership now, and yours doesn't exist yet.
 //
@@ -101,7 +100,6 @@ async function upgradeOwner() {
     .update({
       features: OWNER.features,
       inbound_address: ownerAddress,
-      invited_email: OWNER.digest_email,
     })
     .eq('digest_email', OWNER.digest_email)
     .select()
@@ -126,7 +124,7 @@ async function upgradeOwner() {
     console.log(
       `\n⚠  No Supabase auth user for ${OWNER.digest_email} yet.\n` +
         `   Sign in once at ${APP_URL}/login, then re-run this command.\n` +
-        `   (invited_email is set, so the sign-in will attach you automatically.)`
+        `   (Your invite row exists, so the sign-in will attach you automatically.)`
     );
   } else {
     await supabase
@@ -170,7 +168,6 @@ async function provisionFamily() {
       name,
       timezone: arg('timezone') || 'America/Los_Angeles',
       digest_email: email,
-      invited_email: email,
       inbound_address: inboundAddress,
       parser_instructions: arg('instructions') || null,
       features: ['email', 'tasks'],

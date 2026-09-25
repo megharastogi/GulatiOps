@@ -40,7 +40,7 @@ async function checkSchema() {
   console.log('\nSchema');
 
   const probes: [string, string][] = [
-    ['households', 'features, inbound_address, parser_instructions, invited_email'],
+    ['households', 'features, inbound_address, parser_instructions'],
     ['household_users', 'household_id, auth_user_id, role'],
     ['household_invites', 'household_id, email, role, claimed_at, claimed_by'],
     ['mcp_tokens', 'household_id, token_hash, revoked_at'],
@@ -59,7 +59,7 @@ async function checkHouseholds() {
 
   const { data, error } = await admin
     .from('households')
-    .select('id, name, digest_email, inbound_address, invited_email, features')
+    .select('id, name, digest_email, inbound_address, features')
     .order('created_at');
 
   if (error) return bad('could not list households', error.message);
