@@ -90,6 +90,7 @@ export async function getDigest(
       .from('school_calendar')
       .select(`*, ${SOURCE_EMAIL}`)
       .eq('household_id', householdId)
+      .is('hidden_at', null)
       .gte('start_date', todayStr)
       .lte('start_date', twoWeeksStr)
       .order('start_date')

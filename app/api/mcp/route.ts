@@ -424,6 +424,7 @@ async function callTool(name: string, args: any, household: Household) {
         .from('school_calendar')
         .select('*')
         .eq('household_id', household.id)
+        .is('hidden_at', null)
         .gte('start_date', start)
         .lte('start_date', end);
       if (args.event_types?.length) q = q.in('event_type', args.event_types);

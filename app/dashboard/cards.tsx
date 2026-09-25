@@ -8,6 +8,7 @@
 import Link from 'next/link';
 import { type SourceEmail } from '@/lib/digest';
 import { markDone } from './actions';
+import RemoveEventButton from './RemoveEventButton';
 
 export function formatDate(dateStr: string) {
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', {
@@ -169,6 +170,7 @@ export function EventCard({ event }: { event: any }) {
           source={event.source_email}
         />
       </div>
+      <RemoveEventButton id={event.id} title={event.title} />
     </div>
   );
 }

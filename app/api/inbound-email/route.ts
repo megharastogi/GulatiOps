@@ -251,6 +251,10 @@ function normalizeParsedOutput(
 // plausibly be talking about. Reaches a little into the past because a weekly
 // update often recaps the last few days alongside the week ahead, and caps the
 // list so a household with a busy year can't crowd the email out of the prompt.
+//
+// Includes events the family removed from the dashboard (hidden_at set). That
+// is what keeps them removed: a restatement matches the hidden row and merges
+// into it rather than landing as a fresh, visible one.
 async function fetchExistingEvents(householdId: string) {
   const from = new Date();
   from.setDate(from.getDate() - 14);

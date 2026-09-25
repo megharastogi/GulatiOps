@@ -31,6 +31,7 @@ export default async function DashboardHome() {
       .from('school_calendar')
       .select(`*, ${SOURCE_EMAIL}`)
       .eq('household_id', household.id)
+      .is('hidden_at', null)
       .gte('start_date', today)
       .lte('start_date', twoWeeksStr)
       // Date alone leaves same-day events in insert order, which put a 4:30

@@ -76,6 +76,10 @@ create table school_calendar (
   remind_two_weeks_before boolean default false,
   remind_one_week_before boolean default true,
   remind_day_before boolean default true,
+  -- Set when the family removes the event from the dashboard. A soft delete
+  -- on purpose: the row stays visible to the email parser, so the next
+  -- newsletter restating the event folds into it instead of re-adding it.
+  hidden_at timestamptz,
   created_at timestamptz default now()
 );
 
@@ -509,3 +513,10 @@ create policy household_invites_household_rw on household_invites
   for all to authenticated
   using (household_id in (select auth_household_ids()))
   with check (household_id in (select auth_household_ids()));
+
+-- ============================================================
+-- REMOVABLE EVENTS MIGRATION: run in the Supabase SQL editor
+-- BEFORE deploying the code that reads hidden_at. Safe to skip if
+-- applying schema.sql fresh (the column is in the table above).
+-- ============================================================
+alter table school_calendar add column if not exists hidden_at timestamptz;

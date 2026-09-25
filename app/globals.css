@@ -372,6 +372,14 @@ input[type='time'] {
   min-width: 0;
 }
 
+/* Quiet on purpose: removing is the rare case, reading the card the common one. */
+.event-remove {
+  flex: 0 0 auto;
+  margin: -6px -6px 0 0;
+  font-size: 13px;
+  line-height: 1;
+}
+
 .checkbox {
   position: relative;
   display: block;
