@@ -4,6 +4,7 @@ import { getHousehold, hasFeature } from '@/lib/household';
 import { ConnectorPanel, CopyRow } from './ConnectorPanel';
 import { KidsPanel } from './KidsPanel';
 import { ParserInstructions } from './ParserInstructions';
+import { NotificationCheck } from './NotificationCheck';
 import { PeoplePanel } from './PeoplePanel';
 import { listKids, listLogins } from './actions';
 
@@ -135,6 +136,15 @@ export default async function SetupPage() {
           so you&apos;ll need to tell them yourself.
         </p>
         <PeoplePanel initialLogins={logins} signInUrl={signInUrl} />
+      </section>
+
+      <section>
+        <h3 style={{ fontSize: 14, margin: '0 0 4px' }}>Notifications</h3>
+        <p className="muted" style={{ marginTop: 0, fontSize: 14 }}>
+          Weekly notifications aren&apos;t built yet. This checks whether this
+          phone could receive one.
+        </p>
+        <NotificationCheck />
       </section>
     </div>
   );
