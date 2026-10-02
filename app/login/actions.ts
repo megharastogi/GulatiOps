@@ -1,10 +1,14 @@
 'use server';
 
 import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
+import { attachInvitedUser, destinationFor } from '@/lib/sign-in';
 
-type State = { sent?: boolean; error?: string };
+// `email` rides along once the message is sent, so the code form knows which
+// address the code belongs to without asking for it a second time.
+type State = { sent?: boolean; email?: string; error?: string };
 
 /**
  * Supabase's own wording, translated for someone who has never heard of
@@ -77,5 +81,44 @@ export async function requestMagicLink(_prevState: State, formData: FormData): P
   });
 
   if (error) return { error: signInError(error) };
-  return { sent: true };
+  return { sent: true, email };
+}
+
+/**
+ * Signs in with the code from the same email the magic link comes in.
+ *
+ * This is the only way into the iOS home screen app. The app keeps its own
+ * cookies, separate from Safari's, and a magic link always opens in Safari —
+ * so the link signs Safari in and leaves the app signed out. The copy of
+ * Safari's cookies iOS hands the app when it's added to the home screen
+ * doesn't survive either: it shares Safari's refresh token, and whichever of
+ * the two refreshes second finds that token already spent. Typing the code
+ * into the app itself gives the app a session of its own.
+ *
+ * Needs {{ .Token }} in the Magic Link email template in Supabase.
+ */
+export async function verifyCode(_prevState: State, formData: FormData): Promise<State> {
+  const email = String(formData.get('email') || '')
+    .trim()
+    .toLowerCase();
+  // Strip anything that isn't a digit — iOS one-time-code autofill and pasting
+  // from mail both tend to bring spaces along.
+  const token = String(formData.get('token') || '').replace(/\D/g, '');
+
+  if (!email) return { error: 'Enter an email address.' };
+  if (!token) return { sent: true, email, error: 'Enter the code from the email.' };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.verifyOtp({ email, token, type: 'email' });
+
+  if (error || !data.user) {
+    return {
+      sent: true,
+      email,
+      error: 'That code is wrong or has expired. Check the latest email, or send a new one.',
+    };
+  }
+
+  await attachInvitedUser(data.user.id, data.user.email);
+  redirect(await destinationFor(data.user.id, '/dashboard'));
 }
