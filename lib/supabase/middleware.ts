@@ -27,6 +27,17 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // getUser() may have just refreshed the session, rotating the refresh
+  // token, and the new cookies are on `response`. Any other response this
+  // returns has to carry them too: Supabase has already retired the old
+  // token, so a browser left holding it is signed out on its next refresh.
+  // signOut() below relies on this as well — its cookie deletions land on
+  // `response` and only reach the browser this way.
+  const withSessionCookies = (res: NextResponse) => {
+    response.cookies.getAll().forEach((cookie) => res.cookies.set(cookie));
+    return res;
+  };
+
   const isAuthRoute =
     request.nextUrl.pathname.startsWith('/login') ||
     request.nextUrl.pathname.startsWith('/auth');
@@ -41,15 +52,32 @@ export async function updateSession(request: NextRequest) {
   // multi-household migration in schema.sql hasn't been applied, this query
   // returns nothing and everyone is locked out — fail-closed, and the
   // ?error=no_household redirect below says which case it is.
+  //
+  // "No row" and "couldn't ask" are kept apart. Only the first means this
+  // person isn't in a household; the second is a network blip or a slow
+  // Supabase, and treating it the same way signed real users out for good.
   let householdId: string | null = null;
+  let lookupFailed = false;
   if (user) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('household_users')
       .select('household_id')
       .eq('auth_user_id', user.id)
       .limit(1)
       .maybeSingle();
     householdId = data?.household_id ?? null;
+    lookupFailed = !!error;
+  }
+
+  // Still fail-closed — nothing is served without a confirmed household — but
+  // the session survives, so reloading is all it takes once Supabase answers.
+  if (lookupFailed && !isAuthRoute) {
+    return withSessionCookies(
+      new NextResponse('Could not reach the database. Reload to try again.', {
+        status: 503,
+        headers: { 'content-type': 'text/plain; charset=utf-8', 'retry-after': '5' },
+      })
+    );
   }
 
   if (!householdId && !isAuthRoute) {
@@ -60,19 +88,19 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = '/login';
       url.searchParams.set('error', 'no_household');
-      return NextResponse.redirect(url);
+      return withSessionCookies(NextResponse.redirect(url));
     }
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.search = '';
-    return NextResponse.redirect(url);
+    return withSessionCookies(NextResponse.redirect(url));
   }
 
   if (householdId && request.nextUrl.pathname === '/login') {
     const url = request.nextUrl.clone();
     url.pathname = '/dashboard';
     url.search = '';
-    return NextResponse.redirect(url);
+    return withSessionCookies(NextResponse.redirect(url));
   }
 
   return response;
